@@ -1502,3 +1502,100 @@ it.skipIf(!OUT)("writes citation export fixtures", async () => {
   }
   write("export-citations.json", { project, exports: out });
 });
+
+it.skipIf(!OUT)("writes citation import and library fixtures", async () => {
+  const { importCitations } = await import("$lib/citations/import");
+  const { parseBibtex, decodeLatex } = await import("$lib/citations/bibtex");
+  const { parseRis } = await import("$lib/citations/ris");
+  const lib = await import("$lib/citations/library");
+  // ProseCraft's own import test inputs, read from its test file and evaluated as written.
+  const testSource = readFileSync(join(__dirname, "lib/citations/import.test.ts"), "utf8");
+  const own: Record<string, string> = {};
+  for (const m of testSource.matchAll(/const (\w+) = ((?:String\.raw)?`[\s\S]*?`);/g)) {
+    own[m[1]] = new Function(`return ${m[2]}`)() as string;
+  }
+  const bib = [
+    ...Object.values(own),
+    "@book{a, title = {Plain}, author = {Doe, Jane and John Smith and {Lighthouse Society}}, year = {2020}, editor = {Ed, It}}",
+    "@inproceedings{conf, title = \"Quoted title\", booktitle = {Proc. of {X}}, pages = {1-5}, year = 2018, month = {jul}, publisher = {P}, address = {Oslo}}",
+    "@misc{web, title = {A page}, howpublished = {\\url{https://example.org}}, note = {Accessed 2024}, urldate = {2024-01-02}}",
+    "@phdthesis{t, author = {Student, Sue}, title = {Fog}, school = {Harbour U}, year = {2017}}",
+    "@techreport{r, author = {Org}, title = {Report}, institution = {Inst}, number = {7}, year = {2001}}",
+    "@incollection{c, author = {Chap, C.}, title = {Ch}, booktitle = {Book}, editor = {E, E. and F, F.}, pages = {3--9}, year = {1999}, publisher = {Pub}}",
+    "@article{x, title = {Unbalanced {brace}, year = {2000}}\n@article{y, title = {Next}, year = {2001}}",
+    "@preamble{\"\\newcommand{\\noop}[1]{}\"}\n@string{a = {A}}\n@article{z, title = a # { and B}, journal = {J}, year = {2002}, volume = {3}, number = {4}}",
+    "@article{, title = {No key}}",
+    "@article{dup, title = {First}}\n@article{dup, title = {Second}}",
+    "@online{o, author = {Online, O.}, title = {Online thing}, url = {https://o.example}, date = {2023-05-06}}",
+    "no entries here",
+    "@book{acc, title = {\\'Ecole, na\\\"ive, {\\ss}, \\o, \\aa, \\c{c}, \\~n, ---, --, ``q''}, author = {{\\'E}mile Zola}}"
+  ];
+  const ris = [
+    ...Object.values(own).filter((t) => /^\s*TY\s/m.test(t)),
+    "TY  - JOUR\nAU  - Doe, Jane\nAU  - Roe, R.\nTI  - Tides\nJO  - Journal\nVL  - 12\nIS  - 3\nSP  - 101\nEP  - 120\nPY  - 2019/04/01/\nDO  - 10.1/x\nUR  - https://x.y\nER  - \n",
+    "TY  - BOOK\nA1  - Smith, Jo\nED  - Editor, Ed\nT1  - Book title\nPB  - Press\nCY  - Bristol\nDA  - 2020///\nSN  - 978\nER  -\nTY  - CHAP\nAU  - Chap, C\nT1  - Chapter\nT2  - Container\nSP  - 3\nY1  - 1999\nER  - ",
+    "TY  - THES\nAU  - Student\nTI  - Thesis\nPB  - University\nPY  - 2017\nM3  - PhD\nER  - \nTY  - RPRT\nTI  - No end",
+    "TY  - ELEC\nTI  - Page\nUR  - https://example.org\nY2  - 2024/01/02\nER  - ",
+    "garbage\nTI  - before TY\nTY  - GEN\nTI  - generic\nER  - "
+  ];
+  const json = [
+    own.CSL_JSON_FIXTURE ?? "",
+    JSON.stringify({ items: [{ id: "a", type: "book", title: "T" }] }),
+    JSON.stringify({ id: "single", type: "book", title: "One" }),
+    JSON.stringify({ nope: true }),
+    "[{\"id\": \"broken\", ",
+    "﻿[]"
+  ];
+  const imports = [
+    ...bib.map((text, i) => ({ text, filename: i % 3 === 0 ? `lib${i}.bib` : "" })),
+    ...ris.map((text, i) => ({ text, filename: i % 2 === 0 ? `lib${i}.ris` : "x.txt" })),
+    ...json.map((text, i) => ({ text, filename: i % 2 === 0 ? "refs.json" : "" })),
+    { text: "   \n", filename: "empty.bib" },
+    { text: "plain words", filename: "" },
+    { text: "@article{q, title={T}}", filename: "refs.CSL" }
+  ].map((c) => ({ ...c, result: importCitations(c.text, c.filename) }));
+  const bibtex = bib.map((text) => ({ text, result: parseBibtex(text) }));
+  const risParsed = ris.map((text) => ({ text, result: parseRis(text) }));
+  const latex = ["{\\\"o}", "\\'e", "\\v{C}", "{\\ss}", "--", "---", "1--5", "\\&", "\\%", "$x^2$", "{\\em it}", "\\textit{t}", "~", "\\\\", "\\url{u}", "a\\,b"]
+    .flatMap((input) => [{ input, pages: false, out: decodeLatex(input) }, { input, pages: true, out: decodeLatex(input, { isPages: true }) }]);
+  const names = [[], [{ family: "Doe", given: "Jane" }], [{ family: "Doe" }, { literal: "Org" }], [{ family: "A" }, { family: "B" }, { family: "C" }], [{ given: "Only" }]]
+    .map((n) => ({ names: n, list: lib.formatAuthorList(n as never) }));
+  const parsedNames = ["Doe, Jane; Roe, Richard", "Jane Doe and Richard Roe", "  ", "Plato", "Doe, J.; ; Smith", "van der Berg, Anna"]
+    .map((raw) => ({ raw, names: lib.parseAuthorList(raw) ?? null }));
+  const items = (await import("$lib/citations/csl")).normalizeCslItems([
+    { id: "mueller2020", citeKey: "mueller2020", type: "book", title: "Ü", author: [{ family: "Müller" }], issued: { "date-parts": [[2020]] } },
+    { id: "x", type: "article-journal", title: "Y", issued: { literal: "Spring 1999" } },
+    { id: "z", type: "webpage", title: "Z", editor: [{ family: "Ed" }], issued: { raw: "2001-02" } },
+    { id: "n", type: "thesis", title: "N" }
+  ]);
+  const library = {
+    items,
+    years: items.map((item) => lib.itemYearText(item)),
+    contributors: items.map((item) => lib.formatItemContributors(item)),
+    types: ["book", "article-journal", "chapter", "webpage", "thesis", "report", "BOOK", "weird"].map((t) => ({ type: t, label: lib.sourceTypeLabel(t), manual: lib.cslTypeToManualKind(t) })),
+    manual: ["book", "article", "chapter", "website"].map((k) => ({ kind: k, type: lib.manualKindToCslType(k as never) })),
+    keys: [
+      [{ author: [{ family: "Müller" }], year: "2020" }, items, undefined],
+      [{ author: [{ family: "Müller" }], year: "2020" }, items, "mueller2020"],
+      [{ editor: [{ literal: "Ørsted Society" }], year: "c. 1850" }, items, undefined],
+      [{ title: "  The lighthouse keeper", year: "" }, items, undefined],
+      [{}, [], undefined],
+      [{ author: [{ family: "Zoë" }], year: "2021" }, [{ id: "zoe2021", type: "book" }, { id: "x", citeKey: "zoe2021-2", type: "book" }], undefined]
+    ].map(([params, existing, exclude]) => ({ params, existing, exclude: exclude ?? null, key: lib.generateCitationKey(params as never, existing as never, exclude as never) })),
+    merges: [
+      [items, [{ id: "x", type: "book", title: "New x" }, { id: "fresh", type: "book", title: "Fresh" }, { id: "x", type: "book", title: "Another x" }]],
+      [[], items]
+    ].map(([existing, imported]) => ({ existing, imported, result: lib.mergeImportedCitations(existing as never, imported as never) })),
+    counts: (() => {
+      const cite = (ids: string[]) => `<span class="cite-ref" data-cites="${JSON.stringify(ids.map((id) => ({ id }))).replace(/"/g, "&quot;")}"></span>`;
+      const documents = [
+        { id: "d1", title: "", content: `<p>${cite(["mueller2020"])}</p>` },
+        { id: "d2", title: "", content: "<p>none</p>", footnotes: [{ id: "f", html: `n ${cite(["x", "z"])}` }] },
+        { id: "d3", title: "", content: `<p>${cite(["mueller2020", "x"])}</p>` }
+      ];
+      return items.map((item) => ({ item, documents, count: lib.countSourceCitations(item, documents as never) }));
+    })(),
+    queries: ["", "müller", "MULLER", "2020", "lighthouse", "ed", "z", "spring"].map((query) => ({ query, matches: items.map((item) => lib.matchesLibraryQuery(item, query)) }))
+  };
+  write("citations-import.json", { imports, bibtex, ris: risParsed, latex, names, parsedNames, library });
+});
