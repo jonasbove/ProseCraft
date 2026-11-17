@@ -919,10 +919,21 @@ Hello?
     "MARA\n(beat)\n\n(not parenthetical\n",
     "1 2 3 numbers ONLY\n\nX-RAY 2\nDialogue.\n\nA.B.C.\nTalk.\n"
   ];
+  const { estimatePages, estimateRuntime, wrapScreenplayText } = await import("$lib/screenplay/layout");
+  const { nextElementType, autoDetectType, autoCase, EDITOR_ELEMENT_TYPES } = await import("$lib/screenplay/editor-keys");
+  const long = "INT. HOUSE - DAY\n\n" + Array.from({ length: 40 }, (_, i) => `ALICE\n(beat ${i})\nA line of dialogue that is long enough to wrap over more than one column of the page, number ${i}.\n\nShe moves to the window and waits for a very long time while the rain falls.\n\nEXT. STREET ${i} - NIGHT\n\nBOB\nHi.\n`).join("\n") + "\nCUT TO:\n\n===\n\n> THE END <\n";
+  inputs.push(long);
   const cases = inputs.map((input) => {
     const parsed = parseFountain(input);
     const html = elementsToHtml(parsed.elements);
-    return { input, title: parsed.title, elements: parsed.elements, html, back: htmlToElements(html), fountain: serializeFountain(parsed.title, parsed.elements) };
+    const estimate = estimatePages(parsed.elements);
+    return { input, title: parsed.title, elements: parsed.elements, html, back: htmlToElements(html), fountain: serializeFountain(parsed.title, parsed.elements), estimate, runtime: estimateRuntime(estimate.pages) };
   });
-  write("fountain.json", { cases });
+  const keys = [];
+  for (const type of EDITOR_ELEMENT_TYPES) for (const key of ["Enter", "Tab", "ShiftTab"] as const) for (const empty of [false, true]) keys.push({ type, key, empty, next: nextElementType(type, key, { empty }) });
+  const lines = ["", "  ", "INT. HOUSE", "int. house - day", "INT", "INT.", "EXT.", "EST", "I/E", "INT./EXT. CAR", "INTERIOR", "CUT TO:", "Cut to:", "MARA", "MARA (V.O.)", "Mara", "MARA (cont'd)", "123", "SMASH TO:", "FADE OUT."];
+  const detect = lines.map((line) => ({ line, type: autoDetectType(line) }));
+  const cased = EDITOR_ELEMENT_TYPES.map((type) => ({ type, text: autoCase(type, "Mara's straße – ok") }));
+  const wraps = [["", 10], ["one two three four five", 9], ["  spaced   words\nsecond line  ", 7], ["averyveryverylongword short", 5]].map(([text, width]) => ({ text, width, lines: wrapScreenplayText(text as string, width as number) }));
+  write("fountain.json", { cases, keys, detect, cased, wraps });
 });
