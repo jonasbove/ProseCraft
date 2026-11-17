@@ -7,7 +7,7 @@
  * Randomness (salts, nonces, vault keys) comes from a fixed byte stream, so the
  * encrypted outputs are reproducible and the Rust side can check them byte for byte.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, it, vi } from "vitest";
 import { createVault, deriveKek, encryptEntity, type EntityMetaPlain } from "$lib/storage/crypto";
@@ -16,6 +16,8 @@ import { countWords, htmlToPlainText } from "$lib/publish/content";
 import { markdownToDocument } from "$lib/publish/markdown";
 import { compileBook } from "$lib/publish/compile";
 import { exportText } from "$lib/publish/text";
+import { exportMarkdown, htmlToInlineMarkdown, htmlToMarkdown } from "$lib/publish/markdown";
+import { sanitizeInlineHtml } from "$lib/sanitize";
 import { normalizePublishOptions } from "$lib/publish/types";
 import { sanitizeHtml } from "$lib/sanitize";
 import { createStoredProject, projectContentKey, stableStringify, stampProject } from "$lib/storage/schema";
@@ -316,4 +318,105 @@ it.skipIf(!OUT)("writes plain-text export fixtures", async () => {
     out[name] = { options: raw, text: await payload.blob.text() };
   }
   write("export-text.json", { project, exports: out, filename: exportText(compileBook({ title: project.name, author: "", subtitle: "", copyright: "", dedication: "", frontMatter: [], backMatter: [], chapters: [], documents: [] }), normalizePublishOptions({})).filename });
+});
+
+const IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/** HTML a sanitizer meets: ProseCraft's own output, pasted markup, and hostile input. */
+const SANITIZE_CASES: string[] = [
+  "<p>Plain <em>emphasis</em> and <strong>strong</strong>.</p>",
+  "<p class=\"eyebrow\" style=\"color:red\" onclick=\"x()\">Eyebrow</p>",
+  "<h1>One</h1><h2>Two</h2><h3>Three</h3><h4>Four</h4><h5>Five</h5>",
+  "<p>a<span style=\"x\">b<font>c</font></span>d</p>",
+  "<script>alert(1)</script><p>after</p><style>p{}</style>",
+  "<iframe src=\"x\"></iframe><p>x<object>y</object></p>",
+  "<p><a href=\"https://example.com/a?b=1&amp;c=2\" target=\"_blank\">web</a> <a href=\"javascript:alert(1)\">js</a> <a href=\" JavaScript:alert(1)\">js2</a> <a href=\"java\nscript:x\">js3</a> <a href=\"mailto:a@b.c\">mail</a> <a href=\"/relative\">rel</a> <a href=\"#frag\">frag</a> <a href=\"ftp://x\">ftp</a> <a>none</a> <a href=\"\">empty</a></p>",
+  `<p><img src="${IMG}" alt="dot" width="20" height="0" title="t"></p>`,
+  `<p><img src="${IMG}" alt="a&quot;b" width="2401" height="12.5" data-size="small" data-align="left" data-wrap="wrap-right"></p>`,
+  `<p><img src="${IMG}" data-size="custom" data-width="33.33"><img src="${IMG}" data-size="custom" data-width="5"><img src="${IMG}" data-size="custom"><img src="${IMG}" data-size="huge" data-align="middle"></p>`,
+  "<p><img src=\"https://example.com/x.png\"><img src=\"data:image/gif;base64,R0lGOD==\"></p>",
+  "<p>Note<sup class=\"footnote-ref\" data-footnote-id=\"fn-1\" style=\"x\">1</sup> bad<sup class=\"footnote-ref\" data-footnote-id=\"bad id\">2</sup> plain<sup>3</sup></p>",
+  "<p>See <span class=\"cite-ref\" data-cites=\"[{&quot;id&quot;:&quot;smith2020&quot;,&quot;locator&quot;:&quot; 42 &quot;,&quot;label&quot;:&quot;page&quot;,&quot;prefix&quot;:&quot;  see &quot;,&quot;suffix&quot;:&quot; ff. &quot;}]\">x</span>.</p>",
+  "<p><span class=\"cite-ref\" data-cites=\"[{&quot;id&quot;:&quot;a&quot;,&quot;extra&quot;:1}]\"></span><span class=\"cite-ref\" data-cites=\"not json\"></span><span class=\"cite-ref\" data-cites=\"[]\"></span><span class=\"cite-ref\" data-cites=\"[{&quot;id&quot;:&quot;b&quot;,&quot;label&quot;:&quot;chapter&quot;,&quot;suppressAuthor&quot;:true}]\"></span></p>",
+  "<p>Inline <span class=\"math-inline\" data-tex=\" x^2 \" style=\"x\"><svg><g></g></svg></span> and <span class=\"math-inline\" data-tex=\"  \">gone</span>.</p><div class=\"math-block\" data-tex=\"\\int_0^1 x\\,dx\"><span>rendered</span></div><div class=\"mermaid-diagram\" data-source=\"graph TD; A--&gt;B\"></div><div class=\"calc-worksheet\" data-source=\"x = 2\"></div>",
+  "<p data-sp=\"scene-heading\">INT. ROOM</p><p data-sp=\"bogus\">x</p><p data-sp=\"dialogue\" class=\"eyebrow\">y</p>",
+  "<div class=\"scene-break scene-break-line extra\" style=\"x\">* * *</div><div class=\"scene-break\"><b>#</b></div>",
+  "<p><strike>old</strike> <del>gone</del> <s>s</s> <u>u</u> <i>i</i> <b>b</b> <code>c &lt;x&gt;</code></p>",
+  "<blockquote><p>Quote</p><p>Two</p></blockquote><ul><li>a</li><li>b<ol><li>c</li></ol></li></ul><hr><pre><code>let x = 1;\n  y</code></pre>",
+  "<table><thead><tr><th>H</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table>",
+  "<p>a &amp; b &lt; c &gt; d&nbsp;e \"q\" 'a'</p>",
+  "<div><p>in div</p></div><section><p>in section</p></section>",
+  "text at top <em>level</em><br>after break",
+  "<!-- comment --><p>x<!-- inner --></p>",
+  "<p>a<br/>b</p><p></p><p><br></p>",
+  "<P CLASS=\"EYEBROW\">Upper</P><EM>loud</EM>",
+  "<p>Unicode: café 🌊   tab\tend</p>"
+];
+
+/** HTML for turndown: ProseCraft's rules, escaping, whitespace and nesting. */
+const MARKDOWN_CASES: string[] = [
+  "<p>Plain text.</p><p>Second paragraph.</p>",
+  "<h1>One</h1><h2>Two</h2><h3>Three</h3>",
+  "<p>A <em>b</em> c <strong>d</strong> <em>e <strong>f</strong></em>.</p>",
+  "<p>Space<em> inside </em>em and<strong> strong</strong>x and <em> </em>empty</p>",
+  "<p>a<em>b</em>c and a <em> b </em> c</p>",
+  "<p>* star _ under # hash ` tick [b] \\ slash</p><p>- dash</p><p>+ plus</p><p>1. one</p><p>> gt</p><p>## hd</p><p>=== eq</p><p>~~~ tilde</p><p>12. twelve</p>",
+  "<p>   leading and trailing   </p><p>multi    space\n\nnewlines\ttab</p>",
+  "<ul><li>one</li><li>two<ul><li>nested</li><li>more</li></ul></li><li>three</li></ul>",
+  "<ol><li>first</li><li>second</li></ol><ol start=\"5\"><li>five</li><li>six</li></ol>",
+  "<ul><li><p>para item</p></li><li><p>another</p><p>with two</p></li></ul>",
+  "<blockquote><p>Quote one</p><p>Quote two</p></blockquote>",
+  "<blockquote><p>Outer</p><blockquote><p>Inner</p></blockquote></blockquote>",
+  "<p>Code <code>a`b</code> and <code>`x`</code> and <code>plain</code> and <code></code></p>",
+  "<pre><code>line 1\n  line 2\n</code></pre><pre>no code child</pre>",
+  "<hr><p>after rule</p><p>a<br>b<br>c</p>",
+  "<p><a href=\"https://e.com\">link</a> <a href=\"https://e.com/a b\" title=\"T &quot;q&quot;\">spaced</a> <a href=\"https://e.com/(x)\">paren</a> <a>no href</a> <a href=\"https://e.com\"></a></p>",
+  `<p><img src="${IMG}" alt="a*b"> <img src="${IMG}" alt="dot" title="T"> <img src="${IMG}" data-size="small" data-align="left"></p>`,
+  "<p>Inline <span class=\"math-inline\" data-tex=\"x^2\"></span> math.</p><div class=\"math-block\" data-tex=\"\\int x\"></div>",
+  "<div class=\"mermaid-diagram\" data-source=\"graph TD; A--&gt;B\"></div><div class=\"mermaid-diagram\" data-source=\"a ``` b\"></div><div class=\"calc-worksheet\" data-source=\"x = 2\"></div>",
+  "<p>Note<sup class=\"footnote-ref\" data-footnote-id=\"n1\" contenteditable=\"false\"></sup> and bad<sup class=\"footnote-ref\" data-footnote-id=\"bad id\"></sup>.</p>",
+  "<p>See <span class=\"cite-ref\" data-cites=\"[{&quot;id&quot;:&quot;smith2020&quot;,&quot;locator&quot;:&quot;42&quot;,&quot;label&quot;:&quot;page&quot;,&quot;prefix&quot;:&quot;see&quot;,&quot;suffix&quot;:&quot;ff.&quot;},{&quot;id&quot;:&quot;doe&quot;,&quot;suppressAuthor&quot;:true,&quot;suffix&quot;:&quot;; more [x]&quot;}]\" contenteditable=\"false\"></span> and <span class=\"cite-ref\" data-cites=\"broken\"></span>.</p>",
+  "<p><u>under</u> <s>strike</s> <del>del</del> <u> sp </u></p><p class=\"eyebrow\">Kicker</p>",
+  "<table><tr><th>H</th><td>c</td></tr></table><div>div text</div>",
+  "<p>a&nbsp;b &amp; c &lt;d&gt;</p><p> lead nbsp</p><p><br></p><p></p>",
+  "<p>one<span> two </span>three</p><p><em>x</em> <strong>y</strong></p>",
+  "<p>Unicode 🌊 café soft</p>"
+];
+
+it.skipIf(!OUT)("writes sanitizer and Markdown fixtures", async () => {
+  const sanitize = SANITIZE_CASES.map((html) => ({ html, full: sanitizeHtml(html), inline: sanitizeInlineHtml(html) }));
+  const corpus = JSON.parse(readFileSync(join(OUT!, "rich-corpus.json"), "utf8")) as Array<{ html: string }>;
+  const markdownInputs = [...MARKDOWN_CASES, ...corpus.map((c) => c.html), ...richProject().documents.map((d) => d.content ?? "")];
+  const markdown = markdownInputs.map((html) => ({
+    html,
+    markdown: htmlToMarkdown(html),
+    inline: htmlToInlineMarkdown(html),
+    withNotes: htmlToMarkdown(html, [{ id: "n1", html: "A <em>note</em>\nover lines." }, { id: "bad id", html: "x" }, { id: "n2", html: "" }])
+  }));
+  write("sanitize.json", { cases: sanitize });
+  write("markdown.json", { cases: markdown });
+
+  const project = bookProject();
+  const variants: Record<string, Record<string, unknown>> = {
+    defaults: {},
+    everything: {
+      style: "modern", includeTableOfContents: true, includeSceneTitles: true, includeCopyrightPage: true,
+      sceneSeparator: "asterisks", subtitle: "A Novel", copyright: "© 2026 A. Writer", dedication: "For the keepers.\nAll of them.",
+      frontMatter: [{ id: "f1", title: "Epigraph", body: "Some words." }, { id: "f2", title: "", body: "", blank: true }],
+      backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }]
+    },
+    perChapter: { footnotesRestartPerChapter: true, sceneSeparator: "blank", includeTitlePage: false, includeChapterTitles: false }
+  };
+  const out: Record<string, { options: unknown; markdown: string }> = {};
+  for (const [name, raw] of Object.entries(variants)) {
+    const options = normalizePublishOptions(raw);
+    const live = project.chapters.filter((c) => !c.trashed);
+    const book = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    out[name] = { options: raw, markdown: await exportMarkdown(book, options).blob.text() };
+  }
+  write("export-markdown.json", { project, exports: out });
 });
