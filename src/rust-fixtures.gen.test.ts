@@ -1599,3 +1599,43 @@ it.skipIf(!OUT)("writes citation import and library fixtures", async () => {
   };
   write("citations-import.json", { imports, bibtex, ris: risParsed, latex, names, parsedNames, library });
 });
+
+it.skipIf(!OUT)("writes editor citation label fixtures", async () => {
+  const { renderCitationLabels, citeMarkerHtml } = await import("$lib/citations/cite-marker");
+  const { STYLES } = await import("$lib/citations/styles");
+  const { normalizeCslItems } = await import("$lib/citations/csl");
+  const a = (family: string, given?: string) => ({ family, ...(given ? { given } : {}) });
+  const library = normalizeCslItems([
+    { id: "smith2020", citeKey: "smithLH", type: "book", title: "The Lighthouse Keeper", author: [a("Smith", "Jo Ann")], issued: { "date-parts": [[2020]] }, publisher: "Harbour Press" },
+    { id: "smith2020b", type: "book", title: "Another Lighthouse", author: [a("Smith", "Jo Ann")], issued: { "date-parts": [[2020]] } },
+    { id: "doe-roe", type: "article-journal", title: "Tides", author: [a("Doe", "Jane"), a("Roe", "Richard")], issued: { "date-parts": [[2019]] }, "container-title": "Sea", page: "101-120" },
+    { id: "corp", type: "report", title: "Annual report", author: [{ literal: "World Lighthouse Organization" }], issued: { "date-parts": [[2022]] } },
+    { id: "nodate", type: "book", title: "Undated", author: [a("Nobody", "N.")] }
+  ]);
+  const marker = (cites: unknown) => `<span class="cite-ref" data-cites="${JSON.stringify(cites).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" contenteditable="false"></span>`;
+  const markers = [
+    citeMarkerHtml([{ id: "doe-roe" }]),
+    citeMarkerHtml([{ id: "smithLH", locator: "42", label: "page" }]),
+    citeMarkerHtml([{ id: "smith2020b", prefix: "see ", suffix: "for more" }, { id: "corp", locator: "3", label: "chapter" }]),
+    citeMarkerHtml([{ id: "missing" }]),
+    citeMarkerHtml([{ id: "nodate", suppressAuthor: true }, { id: "gone" }]),
+    citeMarkerHtml([{ id: "doe-roe", locator: "7-9", label: "section" }]),
+    marker("not an array"),
+    marker([{ id: "smith2020" }, { id: "smith2020" }])
+  ];
+  const html = `<p>A ${markers.slice(0, 4).join(" b ")}.</p><p>${markers.slice(4).join(" and ")}</p>`;
+  const cases = [];
+  for (const style of STYLES.map((s) => s.id)) {
+    for (const locale of ["en", "de"] as const) {
+      const root = document.createElement("div");
+      root.innerHTML = html;
+      renderCitationLabels(root, library, style, locale);
+      cases.push({ style, locale, labels: Array.from(root.querySelectorAll("span.cite-ref")).map((e) => e.getAttribute("data-label")) });
+    }
+  }
+  const emptyRoot = document.createElement("div");
+  emptyRoot.innerHTML = html;
+  renderCitationLabels(emptyRoot, [], "apa7", "en");
+  cases.push({ style: "apa7", locale: "en", empty: true, labels: Array.from(emptyRoot.querySelectorAll("span.cite-ref")).map((e) => e.getAttribute("data-label")) });
+  write("citation-labels.json", { library, markers, cases });
+});
