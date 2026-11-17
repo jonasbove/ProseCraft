@@ -1155,3 +1155,108 @@ it.skipIf(!OUT)("writes Markdown (marked) random fixtures", async () => {
   }
   write("marked-random.json", { cases });
 });
+
+it.skipIf(!OUT)("writes Markdown folder import fixtures", async () => {
+  const mf = await import("$lib/import/markdown-folder");
+  const f = (path: string, text: string) => ({ path, text });
+  const frontmatter = [
+    "---\ntitle: T\ntags: [a, \"b\", 'c', ]\naliases:\n  - One\n  - \"Two\"\nposition: 3\n---\nBody",
+    "---\ntitle: Unclosed\nBody",
+    "No header",
+    "﻿---\r\ntitle: 'Quoted'\r\n---\r\nWindows\r\nlines\rold mac",
+    "---\nlist:\n- a\nnot: pair here\n  - b\nkey:value\nk-e_y: v\n---\n",
+    "---\n---\nempty header",
+    "---\ntitle:\n  - In a list\n---\nx",
+    "--- \ntitle: space after dashes\n---\nx",
+    "---\na: 1\n---",
+    "---\nx: [a,b\n---\nrest\n---\nmore"
+  ].map((text) => ({ text, ...mf.parseFrontmatter(text) }));
+  const names = ["03_CHARACTERS", "entwurf_v4_master", "03_C02_die_treppe.md", "README.md", "12.Draft", "1 - One", "__init__", "007", "ÉCOLE", "ünder_score", "x.markdown", "CHAPTER.MD", "a__b", "99_", "🌊_wave", "  spaced  ", "ß_test", "MiXeD_Case"]
+    .map((name) => ({ name, human: mf.humanizeName(name) }));
+  const paths = ["a/b.md", "a/.obsidian/x.md", "a/_archiv/x.md", "a/b.md~", "a/b.json", "B.MARKDOWN", ".hidden.md", "x/y/z.Md", "_x.md", "a/b.mdx"]
+    .map((path) => ({ path, importable: mf.isImportableMarkdownPath(path) }));
+  const suggest = ["Manuscript", "my-drafts", "Kapitel 3", "TEXTE", "World", "notes", "bookends", "Roman", "Characters", "chapter"]
+    .map((name) => ({ name, role: mf.suggestRole(name) }));
+  const folderSets = [
+    [f("02_WORLD/a.md", ""), f("12_MANUSKRIPT/b.md", ""), f("13_ENTWURF/c.md", ""), f("README.md", "")],
+    [f("MANUSCRIPT/draft_v1/a.md", ""), f("MANUSCRIPT/draft_v2/a.md", ""), f("MANUSCRIPT/draft_v10_master/a.md", ""), f("WORLD/x/a.md", ""), f("WORLD/x/b.md", ""), f("WORLD/y/c.md", "")],
+    [f("Book/ch2.md", ""), f("Book/ch10.md", ""), f("Book/ch1.md", ""), f("Book/intro.md", ""), f("notes.md", ""), f(".git/x.md", ""), f("Book/_old/y.md", ""), f("a.txt", "")],
+    [f("Draft/a/b/c.md", ""), f("Draft/a/d.md", ""), f("Draft/e/f.md", ""), f("Text 2/x.md", ""), f("Text 10/x.md", "")],
+    []
+  ].map((files) => ({ files, folders: mf.listImportFolders(files) }));
+  const roleCases = [["MS/new/a.md", { MS: "manuscript", "MS/old": "skip", "(loose files)": "wiki" }], ["MS/old/a.md", { MS: "manuscript", "MS/old": "skip" }], ["MS/old/deeper/a.md", { MS: "manuscript", "MS/old": "skip" }], ["README.md", { "(loose files)": "wiki" }], ["README.md", {}], ["OTHER/a.md", { MS: "wiki" }]]
+    .map(([path, roles]) => ({ path, roles, role: mf.roleOf(path as string, roles as Record<string, "wiki">) }));
+  const estimateFiles = [f("A/a.md", "x".repeat(1000)), f("B/b.md", "y🌊".repeat(50)), f("A/_old/c.md", "z".repeat(99)), f("A/d.json", "q".repeat(99)), f("top.md", "abc")];
+  const estimates = [{ A: "wiki", B: "skip" }, { A: "wiki", B: "wiki", "(loose files)": "manuscript" }, {}]
+    .map((roles) => ({ roles, chars: mf.estimateStoredChars(estimateFiles, roles as Record<string, "wiki">) }));
+  const sets: Array<{ name: string; files: Array<{ path: string; text: string }>; roles: Record<string, string>; modes: string[]; projectName?: string }> = [
+    {
+      name: "prosecraft-test",
+      files: [
+        f("12_MS/v1/02_b.md", "---\ntitle: Second\nposition: 2\n---\n# Second\n\nBeta text [[CHR_a]]."),
+        f("12_MS/v1/01_a.md", "---\ntitle: First\nposition: 1\n---\n# First\n\nAlpha text."),
+        f("12_MS/v2/x.md", "# Other draft\n\nOther."),
+        f("03_CHARS/CHR_a.md", "---\ntitle: Anna\naliases:\n  - A\n---\nAnna is [[nobody|someone]] and [[missing]]."),
+        f("03_CHARS/sub/CHR_b.md", "No heading here."),
+        f("03_CHARS/_old/hidden.md", "hidden"),
+        f("notes.json", "{}")
+      ],
+      roles: { "12_MS": "manuscript", "03_CHARS": "wiki" },
+      modes: ["folders", "files"],
+      projectName: "My Book"
+    },
+    {
+      name: "positions-and-links",
+      files: [
+        f("Book/c.md", "---\nposition: 1e1\n---\nTen [[a#Heading]] and ![[img.png]] and [[A|alias|extra]] and [[ b ]]."),
+        f("Book/a.md", "---\nposition: 0x2\n---\n# A\n\nTwo **bold** <span style=\"x\">s</span><font>f</font><b onclick=\"y\">ok</b>"),
+        f("Book/b.md", "---\nposition:  3 \n---\n## Not a title\n\nThree $x^2$ and [^n]\n\n[^n]: A note."),
+        f("Book/d.md", "---\nposition: x\n---\nNo number so everything sorts by path"),
+        f("Wiki/Deep/Deeper/Deepest/page.md", "# page\n\n- list\n- items"),
+        f("Wiki/A very long folder name that goes on and on past sixty characters for sure/p.md", ""),
+        f("Wiki/🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊/p.md", "x"),
+        f("loose.md", "# Loose\n\n```mermaid\ngraph TD; A-->B;\n```")
+      ],
+      roles: { Book: "manuscript", Wiki: "wiki", "(loose files)": "wiki" },
+      modes: ["folders", "files"],
+      projectName: "  "
+    },
+    {
+      name: "all-positioned-ties-and-natural-order",
+      files: [
+        f("Ch/s10.md", "---\nposition: 1\n---\nten"),
+        f("Ch/s2.md", "---\nposition: 1\n---\ntwo"),
+        f("Ch/s1.md", "---\nposition: -1.5\n---\none"),
+        f("Ch 10/a.md", "x"),
+        f("Ch 2/a.md", "y"),
+        f("Ch 2/sub/a.md", "z")
+      ],
+      roles: { "Ch": "manuscript", "Ch 10": "manuscript", "Ch 2": "manuscript", "Ch 2/sub": "wiki" },
+      modes: ["folders", "files"],
+      projectName: "x".repeat(150)
+    },
+    {
+      name: "wiki-only-and-empty",
+      files: [f("W/a.md", "---\ntitle: \"\"\n---\n# Heading Title\n\nbody"), f("W/b.md", "# Same\n# Same\n"), f("W/c.md", "   # Spaced heading ###   \nrest"), f("W/d.md", "")],
+      roles: { W: "wiki" },
+      modes: ["folders"]
+    },
+    { name: "nothing", files: [f("a.txt", "x")], roles: {}, modes: ["folders"] },
+    {
+      name: "loose-manuscript",
+      files: [f("one.md", "# One\n\nfirst"), f("two.md", "second"), f("Notes/n.md", "[[one]] [[TWO]] [[three]]")],
+      roles: { "(loose files)": "manuscript", Notes: "wiki" },
+      modes: ["folders", "files"]
+    }
+  ];
+  const builds = [];
+  for (const set of sets) {
+    for (const mode of set.modes) {
+      let n = 0;
+      const createId = () => `id-${++n}`;
+      const result = mf.buildMarkdownProject(set.files, { roles: set.roles as Record<string, "wiki">, chapterMode: mode as "folders" }, { createId, name: set.projectName });
+      builds.push({ name: set.name, mode, files: set.files, roles: set.roles, projectName: set.projectName ?? null, project: result.project, report: result.report });
+    }
+  }
+  write("markdown-folder.json", { frontmatter, names, paths, suggest, folderSets, roleCases, estimates: { files: estimateFiles, cases: estimates }, builds });
+});
