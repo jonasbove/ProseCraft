@@ -16,6 +16,7 @@ import { countWords, htmlToPlainText } from "$lib/publish/content";
 import { markdownToDocument } from "$lib/publish/markdown";
 import { compileBook } from "$lib/publish/compile";
 import { exportText } from "$lib/publish/text";
+import { exportHtml } from "$lib/publish/html";
 import { exportMarkdown, htmlToInlineMarkdown, htmlToMarkdown } from "$lib/publish/markdown";
 import { sanitizeInlineHtml } from "$lib/sanitize";
 import { normalizePublishOptions } from "$lib/publish/types";
@@ -419,4 +420,32 @@ it.skipIf(!OUT)("writes sanitizer and Markdown fixtures", async () => {
     out[name] = { options: raw, markdown: await exportMarkdown(book, options).blob.text() };
   }
   write("export-markdown.json", { project, exports: out });
+});
+
+it.skipIf(!OUT)("writes HTML export fixtures", async () => {
+  const project = bookProject();
+  const variants: Record<string, Record<string, unknown>> = {
+    defaults: {},
+    everything: {
+      style: "modern", includeTableOfContents: true, includeSceneTitles: true, includeCopyrightPage: true,
+      sceneSeparator: "asterisks", subtitle: "A Novel <&>", copyright: "© 2026 A. Writer\nAll rights reserved.", dedication: "For the keepers.\nAll of them.",
+      frontMatter: [{ id: "f1", title: "Epigraph", body: "Some words.\n\nMore & more.\r\nSame paragraph." }, { id: "f2", title: "", body: "", blank: true }],
+      backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }]
+    },
+    classicPerChapter: { style: "classic", footnotesRestartPerChapter: true, sceneSeparator: "line", includeChapterTitles: false, pageBreakBeforeChapters: false },
+    classicNoDropCaps: { style: "classic", dropCaps: false, sceneSeparator: "blank", includeTitlePage: false },
+    ebook: { style: "ebook", sceneSeparator: "none", includeCopyrightPage: true, copyright: "© Someone" }
+  };
+  const out: Record<string, { options: unknown; html: string }> = {};
+  for (const [name, raw] of Object.entries(variants)) {
+    const options = normalizePublishOptions(raw);
+    const live = project.chapters.filter((c) => !c.trashed);
+    const book = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    out[name] = { options: raw, html: await exportHtml(book, options).blob.text() };
+  }
+  write("export-html.json", { project, exports: out });
 });
