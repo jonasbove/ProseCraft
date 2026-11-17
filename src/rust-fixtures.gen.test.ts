@@ -947,5 +947,19 @@ Hello?
     const book = compileBook({ title, author, subtitle: "", copyright: "", dedication: "", frontMatter: [], backMatter: [], chapters: chapters as never, documents: documents as never });
     return { title, author, fountain: bookToFountain(book) };
   });
-  write("fountain.json", { cases, keys, detect, cased, wraps, documents, chapters, books });
+  const { proseToScreenplayElements, convertDocumentToScreenplay } = await import("$lib/screenplay/convert");
+  const prose = [
+    "<p>Mara: Is anyone there?</p><p>Old Tom (V.O.): \"Nobody, child.\"</p><p>The door creaks.</p>",
+    "<p>— Hello? she said. — Who is it?</p><p>– Leave, he whispered.</p><p>- Fine, I will, — Mara said.</p>",
+    "<p>She said \"Go away\" and then “Now!” and „Bitte“ and «Allez» to nobody.</p>",
+    "<p>Note: not a speaker</p><p>http: also not</p><p>Van der Berg: a speaker</p><p>de la Cruz: also one</p><p>The very long name of five: too many words</p><p>Who, me: no</p>",
+    "<blockquote><p>Quoted <em>prose</em> line.</p><p>Second <strong>bold</strong> <u>under</u>.</p></blockquote><ul><li>One</li><li>Two<br>Three</li></ul>",
+    "<h1>Title</h1><p>Line one<br>Line two</p><div><p>Nested</p></div><div>Loose div text</div>",
+    "<p>Élodie: Bonjour.</p><p>ÉLODIE (O.S.): Encore.</p><p>Ünal: Merhaba.</p><p>3PO: Beep.</p>",
+    "<p>Text with a footnote<sup class=\"footnote-ref\" data-footnote-id=\"fn-1\" contenteditable=\"false\"></sup>.</p>",
+    "", "<p><br></p>", "<p>   </p>"
+  ];
+  const conversions = prose.map((html) => ({ html, elements: proseToScreenplayElements(html) }));
+  const converted = convertDocumentToScreenplay({ id: "d1", title: "Prose", content: prose[0], chapterId: "c1", markdownSource: "Mara: x", labelId: "l1" } as never);
+  write("fountain.json", { cases, keys, detect, cased, wraps, documents, chapters, books, conversions, converted });
 });
