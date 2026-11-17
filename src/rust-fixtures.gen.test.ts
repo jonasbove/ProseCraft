@@ -805,7 +805,7 @@ it.skipIf(!OUT)("writes Scrivener and RTF import fixtures", async () => {
     "{\\rtf1\\ansi\\ansicpg1251 \\'cf\\'f0\\'e8\\'e2\\'e5\\'f2\\par}", "{\\rtf1\\ansi\\ansicpg936 \\'d6\\'d0\\'ce\\'c4\\par}", "{\\rtf1\\ansi\\ansicpg932 \\'82\\'a0\\par}",
     "{\\rtf1\\ansi\\ansicpg65001 \\'e2\\'82\\'ac\\par}", "{\\rtf1\\ansi\\ansicpg65001 \\'ef\\'bb\\'bfBOM\\par}", "{\\rtf1\\ansi\\ansicpg949 \\'c7\\'d1 \\par}", "{\\rtf1\\ansi\\ansicpg99999 \\'e4\\par}",
     "{\\rtf1\\ansi \\b\\i x\\b0 y\\i0 z\\par}", "{\\rtf1\\ansi \\b x\\pard y\\plain z\\par}", "{\\rtf1\\ansi a\\'zz b\\'4\\par}", "{\\rtf1\\ansi \\uc1\\u8364\\'80 euro\\par}",
-    "{\\rtf1\\ansi \\u65 \\u66\\u67 x\\par}", "{\\rtf1\\ansi {\\*\\ignored {\\b nested}} after\\par}", "{\\rtf1\\ansi {\\pict\\pngblip 89504e47} text\\par}", "{\\rtf1\\ansi \\b {\\i inner} \\par next\\par}",
+    "{\\rtf1\\ansi \\u65 \\u66\\u67 x\\par}", "{\\rtf1\\ansi {\\*\\ignored {\\b nested}} after\\par}", "{\\rtf1\\ansi {\\pict\\pngblip 89504e47} text\\par}", "{\\rtf1\\ansi \\b {\\i inner} \\par next\\par}", "{\\rtf1\\ansi\\ansicpg1251 \\'cf\\ansicpg- \\'cf\\par}", "{\\rtf1\\ansi \\ucx\\u228?? \\b- bold\\par}",
     new Uint8Array([...strToU8("{\\rtf1\\ansi\\ansicpg1252 raw "), 0xe4, 0xf6, ...strToU8("\\par}")]), new Uint8Array([...strToU8("{\\rtf1\\ansi\\ansicpg65001 raw "), 0xe2, 0x82, 0xac, ...strToU8("\\par}")])
   ];
   const rtf = rtfInputs.map((input) => {
