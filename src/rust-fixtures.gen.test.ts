@@ -1438,3 +1438,67 @@ it.skipIf(!OUT)("writes citation style data", async () => {
   const { STYLES, STYLE_TEMPLATES, LOCALE_TERMS } = await import("$lib/citations/styles");
   write("citation-styles.json", { styles: STYLES, templates: STYLE_TEMPLATES, terms: LOCALE_TERMS });
 });
+
+it.skipIf(!OUT)("writes citation export fixtures", async () => {
+  const { exportMarkdown: toMarkdown } = await import("$lib/publish/markdown");
+  const cite = (items: Array<Record<string, unknown>>) =>
+    `<span class="cite-ref" data-cites="${JSON.stringify(items).replace(/"/g, "&quot;")}" contenteditable="false"></span>`;
+  const base = bookProject();
+  const citations = [
+    { id: "smith2020", type: "book", title: "Lighthouses", author: [{ family: "Smith", given: "Jo" }], issued: { "date-parts": [[2020]] }, publisher: "Harbour Press" },
+    { id: "doe-roe", type: "article-journal", title: "Tides and the moon", author: [{ family: "Doe", given: "Jane" }, { family: "Roe", given: "Richard" }], issued: { "date-parts": [[2019]] }, "container-title": "Journal of Sea Studies", volume: "12", issue: "3", page: "101-120", DOI: "10.1000/xyz" },
+    { id: "keyed-item", citeKey: "keyed", type: "chapter", title: "On beams", author: [{ family: "Chapman", given: "Chris" }], editor: [{ family: "Editor", given: "Ed" }], "container-title": "Essays", issued: { "date-parts": [[2015]] }, page: "33-58" },
+    { id: "uncited", type: "book", title: "Never cited", author: [{ family: "Nobody" }], issued: { "date-parts": [[2000]] } },
+    { id: "smith2020b", type: "webpage", title: "A blog post", author: [{ family: "Smith", given: "Jo" }], issued: { "date-parts": [[2020]] }, URL: "https://example.org/post" }
+  ];
+  const project = {
+    ...base,
+    citations,
+    documents: base.documents.map((doc) => {
+      if (doc.id === "doc-4") {
+        return {
+          ...doc,
+          content: `<p>The sea was calm ${cite([{ id: "doe-roe", locator: "12", label: "page" }])}.<sup class="footnote-ref" data-footnote-id="a" contenteditable="false"></sup></p><ul><li>bread ${cite([{ id: "keyed", prefix: "see" }, { id: "smith2020b" }])}</li><li>salt</li></ul><p>Then <strong>nothing</strong> ${cite([{ id: "ghost" }])} ${cite([{ id: "smith2020", suppressAuthor: true }, { id: "ghost2" }])}.<sup class="footnote-ref" data-footnote-id="b" contenteditable="false"></sup></p>`,
+          footnotes: [{ id: "a", html: `Calm, mostly ${cite([{ id: "doe-roe", locator: "3", label: "chapter" }])}.` }, { id: "b", html: "Truly <em>nothing</em>." }]
+        };
+      }
+      if (doc.id === "doc-5") return { ...doc, content: `<p>Light ${cite([{ id: "smith2020" }])}.</p><p>More light.</p>` };
+      return doc;
+    })
+  } as ProjectData;
+  const variants: Record<string, Record<string, unknown>> = {
+    apa: { citationStyle: "apa7" },
+    notes: { citationStyle: "chicago-notes" },
+    ieee: { citationStyle: "ieee", footnotesRestartPerChapter: true },
+    mlaDe: { citationStyle: "mla9", citationLocale: "de" },
+    noBibliography: { citationStyle: "harvard", includeBibliography: false },
+    din: { citationStyle: "din1505", citationLocale: "de", backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }] }
+  };
+  const out: Record<string, unknown> = {};
+  for (const [name, raw] of Object.entries(variants)) {
+    const options = normalizePublishOptions(raw);
+    const live = project.chapters.filter((c) => !c.trashed);
+    const book = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter,
+      citations: project.citations, citationStyle: options.citationStyle, citationLocale: options.citationLocale,
+      includeBibliography: options.includeBibliography
+    });
+    const epub = await exportEpub(book, options);
+    const files = unzipSync(new Uint8Array(await epub.blob.arrayBuffer()));
+    out[name] = {
+      options: raw,
+      text: await exportText(book, options).blob.text(),
+      markdown: await toMarkdown(book, options).blob.text(),
+      html: await (await exportHtml(book, options)).blob.text(),
+      epub: Object.entries(files).map(([entry, bytes]) => ({
+        name: entry,
+        text: strFromU8(bytes)
+          .replace(/urn:uuid:[0-9a-f-]{36}/g, "urn:uuid:ID")
+          .replace(/<meta property="dcterms:modified">[^<]*<\/meta>/, '<meta property="dcterms:modified">MODIFIED</meta>')
+      }))
+    };
+  }
+  write("export-citations.json", { project, exports: out });
+});
