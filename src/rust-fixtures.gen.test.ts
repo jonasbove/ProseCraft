@@ -13,6 +13,7 @@ import { afterAll, beforeAll, it, vi } from "vitest";
 import { createVault, deriveKek, encryptEntity, type EntityMetaPlain } from "$lib/storage/crypto";
 import { serializeEncryptedBundle } from "$lib/storage/encrypted-bundle";
 import { countWords, htmlToPlainText } from "$lib/publish/content";
+import { markdownToDocument } from "$lib/publish/markdown";
 import { sanitizeHtml } from "$lib/sanitize";
 import { createStoredProject, projectContentKey, stableStringify, stampProject } from "$lib/storage/schema";
 import { SCHEMA_VERSION, type ProjectData } from "$lib/storage/types";
@@ -238,4 +239,30 @@ it.skipIf(!OUT)("writes stamping fixtures", () => {
   step("active document only", readded, { ...readded.project, activeDocumentId: "doc-2" }, "device-c", 8_000);
   step("new project", undefined, base, "device-z", 9_000);
   write("stamping.json", { created, steps, contentKey: projectContentKey(base) });
+});
+
+it.skipIf(!OUT)("writes a corpus of ProseCraft's rich HTML", () => {
+  const markdown = [
+    "It was *dark*. Then it was **not**.",
+    "A _quiet_ ~~loud~~ word and `code`.",
+    "# Title\n\n## Heading\n\n### Subheading\n\nBody text.",
+    "> A quoted line.\n\nAfter the quote.",
+    "> First quoted paragraph.\n>\n> Second quoted paragraph.",
+    "- one\n- two\n- three",
+    "1. first\n2. second",
+    "- *styled* item\n- plain item",
+    "A note.[^n1]\n\n[^n1]: The note text.",
+    "See [the site](https://example.com) now.",
+    "***bold italic*** and **bold with *italic* inside**",
+    "Line one\nline two in the same paragraph.",
+    "---\n\nAfter a rule.",
+    "Inline math $x^2$ here.",
+    "<u>underlined</u> text",
+    "Smart quotes “like these” and an em dash — here.",
+    "",
+  ];
+  write("rich-corpus.json", markdown.map((md) => {
+    const html = sanitizeHtml(markdownToDocument(md).html);
+    return { markdown: md, html };
+  }));
 });
