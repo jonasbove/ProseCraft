@@ -865,3 +865,64 @@ it.skipIf(!OUT)("writes Scrivener and RTF import fixtures", async () => {
   });
   write("scrivener-import.json", { rtf, scrivener, zips });
 });
+
+it.skipIf(!OUT)("writes Fountain fixtures", async () => {
+  const { parseFountain, serializeFountain } = await import("$lib/screenplay/fountain");
+  const { elementsToHtml, htmlToElements } = await import("$lib/screenplay/layout");
+  const SAMPLE = `Title: The Last Lighthouse
+Credit: Written by
+Author: Sascha
+Draft date: 12/11/2026
+
+EXT. LIGHTHOUSE - NIGHT
+
+Waves crash against the rocks.
+
+MARA
+(quietly)
+Is anyone there?
+
+CUT TO:
+
+INT. LIGHTHOUSE - NIGHT
+
+MARA
+(into the dark)
+Hello?
+
+> THE END <
+
+===
+`;
+  const inputs = [
+    SAMPLE,
+    "Title: A Very\n    Long Title\nAuthor: Mara\n\nINT. ROOM - DAY\n",
+    "A door opens.\nINT. NOT A HEADING\n",
+    "INT. ROOM - DAY\n\nCUT TO:\n\ncut to:\n",
+    "INT. KITCHEN - DAY\n\nALICE\nLeft.\n\nBOB ^\nRight.\n",
+    "INT. ROOM - DAY\n\n[[first\nsecond]]\n\nAction.\n",
+    "", "  \n\n\t\n",
+    "title: lower case key\nNotes: kept\n    on two lines\nUnknown: stops here\n\nAction.\n",
+    "Title: Only a title\n",
+    ".FORCED HEADING #12#\n\nINT. HOUSE - DAY #1A#\n\nEXT. PARK #  #\n\nI/E. CAR - MOVING\n\nINT/EXT. HALL\n\nEST. CITY\n\nINTERIOR DESIGN is not a heading.\n",
+    "..not forced\n\n.\n\n!INT. FORCED ACTION\n\n!\n",
+    "@McCLANE\nYippee ki-yay.\n\nMcCLANE (V.O.)\nStill not a cue? (lowercase c)\n\nSTEEL (CONT'D)\n(beat)\nRight.\n[[aside]] More.\n\nSTEEL\n\nAfter a blank line, not dialogue.\n",
+    "HANS ^\n\nSOLO\n",
+    "> Forced transition\n\n>CENTERED<\n\n> < \n\nFADE TO BLACK.\n\nSMASH CUT TO:\n\nfade out to:\n",
+    "# Act One\n\n## Sequence\n\n####### Seven\n\n#\n\n= A synopsis\n\n=\n\n===\n\n==\n\nINT. AFTER SECTION - DAY\n",
+    "Action with [[an inline note]] and [[another]]  text.\n\nAction [[unclosed note\ncontinues\n\nnext]] tail text\n",
+    "[[note at end]] and the rest\n\n[[never closed\nat all",
+    "Boneyard /* hidden\nacross lines */ visible.\n\n/* unclosed boneyard\nto the end",
+    "Emphasis: *italic*, **bold**, ***both***, _under_, * not*, **mixed*, a < b & c > d\n\n_un_der_score_\n",
+    "INT. ROOM - DAY\r\n\r\nWindows lines.\r\nMore.\rOld Mac.\r\n",
+    "   Indented action.\n\n\tTabbed.\n\nINT. ROOM - DAY\nNo blank before this action.\nMARA\nNot a cue (no blank before).\n",
+    "MARA\n(beat)\n\n(not parenthetical\n",
+    "1 2 3 numbers ONLY\n\nX-RAY 2\nDialogue.\n\nA.B.C.\nTalk.\n"
+  ];
+  const cases = inputs.map((input) => {
+    const parsed = parseFountain(input);
+    const html = elementsToHtml(parsed.elements);
+    return { input, title: parsed.title, elements: parsed.elements, html, back: htmlToElements(html), fountain: serializeFountain(parsed.title, parsed.elements) };
+  });
+  write("fountain.json", { cases });
+});
