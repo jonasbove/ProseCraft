@@ -1035,3 +1035,45 @@ it.skipIf(!OUT)("writes Markdown (marked) fixtures", async () => {
   });
   write("marked.json", { cases });
 });
+
+it.skipIf(!OUT)("writes Markdown (marked) random fixtures", async () => {
+  const { markdownToHtml, markdownToDocument } = await import("$lib/publish/markdown");
+  const { marked } = await import("marked");
+  // A fixed-seed generator, so the corpus is the same on every run.
+  let seed = 0x2f6b1d;
+  const rand = (n: number) => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return (seed >>> 8) % n;
+  };
+  const pieces = [
+    "*", "**", "***", "_", "__", "~", "~~", "`", "``", "[", "]", "(", ")", "![", "](", "\\", "\\*", "\\“",
+    "<", ">", "<b>", "</b>", "<a href=\"x\">", "</a>", "<pre>", "\n", "\n\n", " ", "  \n", "\t", "    ",
+    "a", "word", "B", "#", "## ", "- ", "* ", "1. ", "2) ", "> ", "| a | b |\n|---|---|\n", "|", "---\n",
+    "```\n", "~~~", "é", "“", "”", "‘", "—", "🌊", "日本", " ", " ", "&", "&amp;", "&#169;", "&#x1F30A;",
+    "$", "$$", "$x$", "\\(", "\\)", "\\[", "\\]", "@key", "[@key, p. 4]", "[see @a; -@b]", "[^n1]", "[^n1]: note\n",
+    "http://ex.am/p?q=1", "www.ex.am", "a@b.co", ":", "\"", "'", ".", ",", "!", "?", "%", "[ref]", "[ref]: /u \"t\"\n",
+    "- [ ] ", "- [x] ", "<!-- c -->", "&nbsp;", "\r\n", "\u0000", "😀*", "*😀", "_é_", "**“q”**", "Σ"
+  ];
+  const cases = [];
+  for (let i = 0; i < 2500; i += 1) {
+    let markdown = "";
+    const count = 1 + rand(24);
+    for (let j = 0; j < count; j += 1) markdown += pieces[rand(pieces.length)];
+    const tree = (tokens: unknown[]): unknown[] => (tokens as Array<Record<string, unknown>>).map((t) => {
+      const node: Record<string, unknown> = { type: t.type, raw: t.raw };
+      if (Array.isArray(t.tokens)) node.tokens = tree(t.tokens);
+      if (Array.isArray(t.items)) node.items = tree(t.items);
+      return node;
+    });
+    let html: string, doc: unknown, tokens: unknown;
+    try {
+      html = markdownToHtml(markdown);
+      doc = markdownToDocument(markdown);
+      tokens = tree(marked.lexer(markdown));
+    } catch {
+      continue;
+    }
+    cases.push({ markdown, html, document: doc, tokens });
+  }
+  write("marked-random.json", { cases });
+});
