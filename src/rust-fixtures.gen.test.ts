@@ -18,6 +18,11 @@ import { compileBook } from "$lib/publish/compile";
 import { exportText } from "$lib/publish/text";
 import { exportHtml } from "$lib/publish/html";
 import { exportEpub } from "$lib/publish/epub";
+import { MemoryFileSystem } from "$lib/storage/sync/memory-fs";
+import { FolderSyncProvider } from "$lib/storage/sync/folder-provider";
+import { EncryptedFileSyncProvider } from "$lib/storage/sync/bundle-provider";
+import { mergeProjects } from "$lib/storage/sync/merge";
+import { safeName } from "$lib/storage/sync/layout";
 import { unzipSync, strFromU8 } from "fflate";
 import { exportMarkdown, htmlToInlineMarkdown, htmlToMarkdown } from "$lib/publish/markdown";
 import { sanitizeInlineHtml } from "$lib/sanitize";
@@ -485,4 +490,89 @@ it.skipIf(!OUT)("writes EPUB export fixtures", async () => {
     out[name] = { options: raw, entries };
   }
   write("export-epub.json", { project, exports: out });
+});
+
+/** A second project: storyboard rows and cards, a deleted scene, and an id that needs encoding. */
+function storyProject(): ProjectData {
+  return {
+    id: "proj/../x é",
+    name: "Second",
+    author: "",
+    activeDocumentId: "d1",
+    projectGoal: 0,
+    chapterGoals: {},
+    activity: {},
+    chapters: [{ id: "c1", title: "Part", expanded: true }],
+    documents: [
+      { id: "d1", title: "Keep", chapterId: "c1", content: "<p>kept</p>" },
+      { id: "d2", title: "Gone", chapterId: "c1", content: "<p>deleted later</p>" }
+    ],
+    storyboardRows: [{ id: "r1", title: "Row" }],
+    storyboardCards: [{ id: "k1", rowId: "r1", title: "Card", text: "beat" }]
+  } as unknown as ProjectData;
+}
+
+async function dump(fs: MemoryFileSystem): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const path of fs.paths()) out[path] = await fs.readText(path);
+  return out;
+}
+
+it.skipIf(!OUT)("writes sync folder, single-file and merge fixtures", async () => {
+  const passphrase = "sync passphrase ✓";
+  const first = createStoredProject(richProject(), "device-a", 1_763_000_000_000);
+  const draft = createStoredProject(storyProject(), "device-a", 1_763_000_000_000);
+  // Delete scene d2: a tombstone in the header, no content file.
+  const edited = { ...draft.project, documents: draft.project.documents.filter((d) => d.id !== "d2") };
+  const second = stampProject(draft, edited, "device-b", 1_763_000_100_000);
+  const projects = [first, second];
+
+  const folderFs = new MemoryFileSystem();
+  const folder = new FolderSyncProvider(folderFs, { memoryKiB: 64, iterations: 1, parallelism: 1 });
+  const folderConnection = await folder.connect(passphrase);
+  await folder.push(projects, folderConnection.vaultKey);
+
+  const fileFs = new MemoryFileSystem();
+  const file = new EncryptedFileSyncProvider(fileFs);
+  const fileConnection = await file.connect(passphrase);
+  await file.push(projects, fileConnection.vaultKey);
+
+  const safeNames = ["project-1", "a.b_c-d", ".hidden", "proj/../x é", "..", "", "日本"].map((id) => ({ id, name: safeName(id) }));
+
+  // Merge cases. Math.random is pinned so conflict-copy ids are predictable.
+  const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const base = createStoredProject({ ...richProject(), id: "m" }, "device-a", 1000);
+  const edit = (from: typeof base, name: string, device: string, now: number) =>
+    stampProject(from, { ...from.project, name }, device, now);
+  const stamp = (p: typeof base) => ({ updatedAt: p.updatedAt, revision: p.revision });
+  const localEdit = edit(base, "Local", "device-a", 2000);
+  const remoteEdit = edit(base, "Remote", "device-b", 3000);
+  const sameTime = edit(base, "Same time", "device-c", 3000);
+  const cases: Record<string, { local: unknown[]; remote: unknown[]; lastSynced: Record<string, unknown> }> = {
+    newOnBothSides: { local: [base], remote: [{ ...createStoredProject({ ...richProject(), id: "n" }, "device-b", 1500) }], lastSynced: {} },
+    onlyLocalChanged: { local: [localEdit], remote: [base], lastSynced: { m: stamp(base) } },
+    onlyRemoteChanged: { local: [base], remote: [remoteEdit], lastSynced: { m: stamp(base) } },
+    bothChanged: { local: [localEdit], remote: [remoteEdit], lastSynced: { m: stamp(base) } },
+    bothChangedSameTime: { local: [sameTime], remote: [remoteEdit], lastSynced: { m: stamp(base) } },
+    sameContent: { local: [base], remote: [{ ...base, revision: base.revision + 1 }], lastSynced: {} },
+    deletedRemotely: { local: [base], remote: [], lastSynced: { m: stamp(base) } },
+    deletedRemotelyAfterLocalEdit: { local: [localEdit], remote: [], lastSynced: { m: stamp(base) } },
+    deletedLocally: { local: [], remote: [base], lastSynced: { m: stamp(base) } },
+    deletedLocallyAfterRemoteEdit: { local: [], remote: [remoteEdit], lastSynced: { m: stamp(base) } },
+    forgotten: { local: [], remote: [], lastSynced: { gone: { updatedAt: 1, revision: 1 } } }
+  };
+  const merges: Record<string, unknown> = {};
+  for (const [name, c] of Object.entries(cases)) {
+    merges[name] = { ...c, outcome: mergeProjects(c.local as never, c.remote as never, c.lastSynced as never, 5_000_000, "device-z") };
+  }
+  random.mockRestore();
+
+  write("sync.json", {
+    passphrase,
+    projects,
+    folder: await dump(folderFs),
+    singleFile: await dump(fileFs),
+    safeNames,
+    merges
+  });
 });
