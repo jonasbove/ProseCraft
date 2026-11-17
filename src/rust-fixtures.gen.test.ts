@@ -23,6 +23,8 @@ import { FolderSyncProvider } from "$lib/storage/sync/folder-provider";
 import { EncryptedFileSyncProvider } from "$lib/storage/sync/bundle-provider";
 import { mergeProjects } from "$lib/storage/sync/merge";
 import { safeName } from "$lib/storage/sync/layout";
+import { commentText } from "$lib/comment-dom";
+import { buildAnchor, locateAnchor } from "$lib/comments";
 import { unzipSync, strFromU8 } from "fflate";
 import { exportMarkdown, htmlToInlineMarkdown, htmlToMarkdown } from "$lib/publish/markdown";
 import { sanitizeInlineHtml } from "$lib/sanitize";
@@ -594,4 +596,27 @@ it.skipIf(!INTEROP)("reads the sync layouts prosecraft-rs writes", async () => {
     if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${name}: projects differ`);
     console.log(`interop ${name}: ProseCraft read ${connection.projects.length} projects, identical`);
   }
+});
+
+it.skipIf(!OUT)("writes comment anchor fixtures", async () => {
+  const corpus = JSON.parse(readFileSync(join(OUT!, "rich-corpus.json"), "utf8")) as Array<{ html: string }>;
+  const htmls = [
+    ...corpus.map((c) => c.html),
+    ...richProject().documents.map((d) => d.content ?? ""),
+    "<p>The cat sat. The cat ran. The cat sat again.</p>",
+    "<p>a&nbsp;b &amp; c</p><p>  spaced  </p><ul><li>one</li><li>two</li></ul>",
+    "<p>Emoji 🌊 and 𝔐 here.</p><p>x<br>y</p>"
+  ];
+  const texts = htmls.map((html) => {
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    // The editor shows equations and diagrams as non-editable widgets.
+    for (const el of div.querySelectorAll(".math-inline, .math-block, .mermaid-diagram, .calc-worksheet")) el.setAttribute("contenteditable", "false");
+    return { html, text: commentText(div) };
+  });
+  const sample = "The cat sat. The cat ran. The cat sat again. 🌊 end";
+  const anchors = [[4, 7], [17, 20], [30, 33], [0, 0], [12, 13], [45, 47], [40, 100], [7, 4]].map(([s, e]) => ({ start: s, end: e, anchor: buildAnchor(sample, s, e) }));
+  const edited = "Intro. The cat sat. The cat ran! The dog sat again. 🌊 end";
+  const located = anchors.filter((a) => a.anchor).map((a) => ({ anchor: a.anchor, found: locateAnchor(edited, a.anchor!) }));
+  write("comments.json", { texts, sample, anchors, edited, located });
 });
