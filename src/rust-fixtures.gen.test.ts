@@ -576,3 +576,22 @@ it.skipIf(!OUT)("writes sync folder, single-file and merge fixtures", async () =
     merges
   });
 });
+
+const INTEROP = process.env.PROSECRAFT_INTEROP_DIR;
+
+/** Reads the sync layouts prosecraft-rs wrote with ProseCraft's own providers. */
+it.skipIf(!INTEROP)("reads the sync layouts prosecraft-rs writes", async () => {
+  const fixture = JSON.parse(readFileSync(join(OUT ?? INTEROP!, "sync.json"), "utf8"));
+  for (const [name, Provider] of [["folder", FolderSyncProvider], ["single-file", EncryptedFileSyncProvider]] as const) {
+    const files = JSON.parse(readFileSync(join(INTEROP!, `${name}.json`), "utf8")) as Record<string, string>;
+    const fs = new MemoryFileSystem();
+    for (const [path, content] of Object.entries(files)) await fs.writeText(path, content);
+    const connection = await new Provider(fs).connect(fixture.passphrase);
+    if (connection.created) throw new Error(`${name}: ProseCraft didn't recognise the layout`);
+    const byId = (list: typeof fixture.projects) => [...list].sort((a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1)).map((p: unknown) => stableStringify(p));
+    const got = byId(connection.projects);
+    const want = byId(fixture.projects);
+    if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${name}: projects differ`);
+    console.log(`interop ${name}: ProseCraft read ${connection.projects.length} projects, identical`);
+  }
+});
