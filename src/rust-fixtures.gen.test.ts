@@ -14,6 +14,9 @@ import { createVault, deriveKek, encryptEntity, type EntityMetaPlain } from "$li
 import { serializeEncryptedBundle } from "$lib/storage/encrypted-bundle";
 import { countWords, htmlToPlainText } from "$lib/publish/content";
 import { markdownToDocument } from "$lib/publish/markdown";
+import { compileBook } from "$lib/publish/compile";
+import { exportText } from "$lib/publish/text";
+import { normalizePublishOptions } from "$lib/publish/types";
 import { sanitizeHtml } from "$lib/sanitize";
 import { createStoredProject, projectContentKey, stableStringify, stampProject } from "$lib/storage/schema";
 import { SCHEMA_VERSION, type ProjectData } from "$lib/storage/types";
@@ -265,4 +268,52 @@ it.skipIf(!OUT)("writes a corpus of ProseCraft's rich HTML", () => {
     const html = sanitizeHtml(markdownToDocument(md).html);
     return { markdown: md, html };
   }));
+});
+
+/** A project with two live chapters and footnotes in several scenes, for the exporters. */
+function bookProject(): ProjectData {
+  const base = richProject();
+  return {
+    ...base,
+    chapters: [
+      ...base.chapters,
+      { id: "chapter-3", title: "Chapter 7", expanded: true, summary: "" },
+      { id: "chapter-4", title: "Epilogue", expanded: true }
+    ],
+    documents: [
+      ...base.documents,
+      { id: "doc-4", title: "Morning", chapterId: "chapter-3", content: '<p>The sea was calm.<sup class="footnote-ref" data-footnote-id="a" contenteditable="false"></sup></p><ul><li>bread</li><li>salt</li></ul><p>Then <strong>nothing</strong>.<sup class="footnote-ref" data-footnote-id="b" contenteditable="false"></sup></p>', footnotes: [{ id: "a", html: "Calm, mostly." }, { id: "b", html: "Truly <em>nothing</em>." }] },
+      { id: "doc-5", title: "Noon", chapterId: "chapter-3", content: "<p>Light.</p><p>More light.</p>" },
+      { id: "doc-6", title: "Empty", chapterId: "chapter-3", content: "<p><br></p>" },
+      { id: "doc-7", title: "Gone", chapterId: "chapter-3", content: "<p>Trashed text.</p>", trashed: true },
+      { id: "doc-8", title: "", chapterId: "chapter-4", content: '<h2>After</h2><blockquote><p>A quote.</p></blockquote><p>Last line.<sup class="footnote-ref" data-footnote-id="z" contenteditable="false"></sup></p>', footnotes: [{ id: "z", html: "The end." }] }
+    ]
+  } as ProjectData;
+}
+
+it.skipIf(!OUT)("writes plain-text export fixtures", async () => {
+  const project = bookProject();
+  const variants: Record<string, Record<string, unknown>> = {
+    defaults: {},
+    everything: {
+      style: "modern", includeTableOfContents: true, includeSceneTitles: true, includeCopyrightPage: true,
+      sceneSeparator: "asterisks", subtitle: "A Novel", copyright: "© 2026 A. Writer", dedication: "For the keepers.",
+      frontMatter: [{ id: "f1", title: "Epigraph", body: "Some words." }, { id: "f2", title: "", body: "", blank: true }],
+      backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }]
+    },
+    perChapter: { footnotesRestartPerChapter: true, sceneSeparator: "none", includeTitlePage: false, includeChapterTitles: false }
+  };
+  const out: Record<string, { options: unknown; text: string }> = {};
+  for (const [name, raw] of Object.entries(variants)) {
+    const options = normalizePublishOptions(raw);
+    const live = project.chapters.filter((c) => !c.trashed);
+    const book = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    const payload = exportText(book, options);
+    out[name] = { options: raw, text: await payload.blob.text() };
+  }
+  write("export-text.json", { project, exports: out, filename: exportText(compileBook({ title: project.name, author: "", subtitle: "", copyright: "", dedication: "", frontMatter: [], backMatter: [], chapters: [], documents: [] }), normalizePublishOptions({})).filename });
 });
