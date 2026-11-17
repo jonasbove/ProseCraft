@@ -1036,15 +1036,18 @@ it.skipIf(!OUT)("writes Markdown (marked) fixtures", async () => {
   write("marked.json", { cases });
 });
 
+const REGRESSIONS: string[] = ["\ud83c\udf0a\\[| a | b |\n|---|---|\n$x$\\\u201c[a@b.co%- [ ] [ref]: /u \"t\"\n__<a href=\"x\">\u0000| a | b |\n|---|---|\n| a | b |\n|---|---|\n``", "\n\n\ud83c\udf0a\\[B`  \n- [x] - [ ] a\u00e9", ">\ud83c\udf0a\\[)[@key, p. 4]", "$>\n\nhttp://x.y  \n_\n- [ ]   \n*\ud83d\ude00\t@k*\ud83d\ude00\u201c]()~~[^a]: n\n\u201c[^a]*\ud83d\ude00 ](\u00a0&#169;**$", "_\u00a0:\n\n$_\ud83c\udf0a*\r\n_\r\n- [ ] >[^a]![&(> ahttp://x.y@k~~&[)](\u201c&\u00e9[^a]: n\n*\ud83d\ude00#[r][^a]: n\n](", "[^a]&[#\n\n\u00e9](  \n- [ ] ~~\n)\ud83c\udf0a#>\\http://x.y\r\n[^a]: n\n$#> \u00e9~~*`~~<\u201c\r\n__*\ud83d\ude00\u00e9a[^a]![&#169;  \n\ud83c\udf0a  \n@k  \n\r\n\u201c\r\n", "- \ud83d\ude00*~~\"_- [ ] - :\r\n*\ud83d\ude00#&&#169;\"*\\*\ud83d\ude00\t\r\n(  \n[^a][r]&#169;\\>- [ ] \ud83d\ude00*a\n\n[|@k#&[r]: /u\n[ [^a]@k*\ud83d\ude00", "- \ud83d\ude00*|&)[\ud83d\ude00**~~![&#169;[^a][r]: /u\n*\ud83d\ude00\t**![\u201c[^a]: n\n*\\~~\n[r]*\ud83d\ude00a)![\u00e9:- **\u201c\"\\\t\\\n*\n\n**&#169;\"[r]: /u\n\ud83d\ude00*\"**![\n`"];
+
 it.skipIf(!OUT)("writes Markdown (marked) random fixtures", async () => {
   const { markdownToHtml, markdownToDocument } = await import("$lib/publish/markdown");
   const { marked } = await import("marked");
-  // A fixed-seed generator, so the corpus is the same on every run.
+  // Fixed-seed generators, so the corpus is the same on every run.
   let seed = 0x2f6b1d;
   const rand = (n: number) => {
     seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
     return (seed >>> 8) % n;
   };
+  // Short pieces: delimiters, escapes, entities, HTML, non-ASCII and astral characters.
   const pieces = [
     "*", "**", "***", "_", "__", "~", "~~", "`", "``", "[", "]", "(", ")", "![", "](", "\\", "\\*", "\\“",
     "<", ">", "<b>", "</b>", "<a href=\"x\">", "</a>", "<pre>", "\n", "\n\n", " ", "  \n", "\t", "    ",
@@ -1054,26 +1057,47 @@ it.skipIf(!OUT)("writes Markdown (marked) random fixtures", async () => {
     "http://ex.am/p?q=1", "www.ex.am", "a@b.co", ":", "\"", "'", ".", ",", "!", "?", "%", "[ref]", "[ref]: /u \"t\"\n",
     "- [ ] ", "- [x] ", "<!-- c -->", "&nbsp;", "\r\n", "\u0000", "😀*", "*😀", "_é_", "**“q”**", "Σ"
   ];
-  const cases = [];
-  for (let i = 0; i < 2500; i += 1) {
+  // Whole lines: indents and tabs, list, quote and heading markers, fences, table rows,
+  // footnote and link definitions with continuation lines.
+  const indents = ["", "", "", " ", "  ", "   ", "    ", "     ", "      ", "        ", "\t", " \t", "\t\t", "  \t"];
+  const markers = ["", "", "", "- ", "* ", "+ ", "1. ", "2) ", "10. ", "> ", ">> ", "> - ", "- > ", "# ", "### ", "```", "```js", "~~~", "| a | b |", "|---|:-:|", "|:-|-:|", "| x \\| y | z |", "[^n1]: ", "[^n-2]:", "[r]: /u 't'", "[R]:\n/v", "***", "---", "===", "$$", "\\[", "\\]", "<div>", "</div>", "<!-- ", "-->", "- [ ] ", "- [x] ", "    ", "> > ", "1) "];
+  const words = ["a", "word", "*em*", "**b**", "_u_", "__s__", "~~d~~", "`c`", "[l](x)", "[r]", "![i](p.png)", "[^n1]", "[@k]", "[see @k, p. 2]", "$x$", "\\*", "&amp;", "&#169;", "é", "“q”", "🌊", "日本", " ", "<b>", "</b>", "http://a.b/c", "www.a.b", "x@y.co", "|", "\\", "*", "_", "~", "[", "]", "(", ")", "!", ":", "-", "#"];
+  const line = () => {
+    let s = indents[rand(indents.length)] + markers[rand(markers.length)];
+    const n = rand(6);
+    for (let k = 0; k < n; k += 1) s += (k ? " " : "") + words[rand(words.length)];
+    return s + "\n";
+  };
+  const inputs: string[] = [...REGRESSIONS];
+  for (let i = 0; i < 400; i += 1) {
     let markdown = "";
-    const count = 1 + rand(24);
+    const count = 1 + rand(40);
     for (let j = 0; j < count; j += 1) markdown += pieces[rand(pieces.length)];
-    const tree = (tokens: unknown[]): unknown[] => (tokens as Array<Record<string, unknown>>).map((t) => {
-      const node: Record<string, unknown> = { type: t.type, raw: t.raw };
-      if (Array.isArray(t.tokens)) node.tokens = tree(t.tokens);
-      if (Array.isArray(t.items)) node.items = tree(t.items);
-      return node;
-    });
-    let html: string, doc: unknown, tokens: unknown;
+    inputs.push(markdown);
+  }
+  for (let i = 0; i < 400; i += 1) {
+    let markdown = "";
+    const lines = 1 + rand(12);
+    for (let j = 0; j < lines; j += 1) markdown += rand(5) === 0 ? "\n" : line();
+    inputs.push(markdown);
+  }
+  const tree = (tokens: unknown[]): unknown[] => (tokens as Array<Record<string, unknown>>).map((t) => {
+    const node: Record<string, unknown> = { type: t.type, raw: t.raw };
+    if (Array.isArray(t.tokens)) node.tokens = tree(t.tokens);
+    if (Array.isArray(t.items)) node.items = tree(t.items);
+    return node;
+  });
+  const cases = [];
+  for (const markdown of inputs) {
     try {
-      html = markdownToHtml(markdown);
-      doc = markdownToDocument(markdown);
-      tokens = tree(marked.lexer(markdown));
+      const html = markdownToHtml(markdown);
+      const doc = markdownToDocument(markdown);
+      // The document's HTML is always the same as markdownToHtml's, so only its footnotes are kept.
+      if (doc.html !== html) throw new Error("document HTML differs");
+      cases.push({ markdown, html, footnotes: doc.footnotes, tokens: tree(marked.lexer(markdown)) });
     } catch {
-      continue;
+      // marked threw; such inputs are left out.
     }
-    cases.push({ markdown, html, document: doc, tokens });
   }
   write("marked-random.json", { cases });
 });
