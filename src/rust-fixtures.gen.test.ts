@@ -787,3 +787,81 @@ it.skipIf(!OUT)("writes EPUB import fixtures", async () => {
   const project = buildEpubProject(manuscript, { createId: () => `id-${++n}` });
   write("epub-import.json", { cases: results, project });
 });
+
+it.skipIf(!OUT)("writes Scrivener and RTF import fixtures", async () => {
+  const { rtfToHtml } = await import("$lib/import/rtf");
+  const { buildScrivenerProject, scrivenerFilesFromZip, scrivenerFilesFromEntries } = await import("$lib/import/scrivener");
+  const { strToU8, zipSync } = await import("fflate");
+  const enc = new TextEncoder();
+  const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
+  // RTF: as text bytes (Scrivener passes bytes), including raw 8-bit and CJK code pages.
+  const rtfInputs: Array<string | Uint8Array> = [
+    "{\\rtf1\\ansi Hello\\par World\\par}", "{\\rtf1\\ansi first\\line second\\par}", "{\\rtf1\\ansi Hello\r\nWorld\\par}", "{\\rtf1\\ansi Hello\\\nWorld\\par}",
+    "{\\rtf1\\ansi Hello\\\r\nWorld\\par}", "{\\rtf1\\ansi one\\par\r\ntwo\\par}", "", "{\\rtf1\\ansi}", "{\\rtf1\\ansi\\par}", "{\\rtf1\\ansi\\ansicpg1252 M\\'e4dchen\\par}",
+    "{\\rtf1\\ansi\\ansicpg1252 \\'93quoted\\'94\\par}", "{\\rtf1\\ansi \\u228?\\par}", "{\\rtf1\\ansi \\uc0\\u228?\\par}", "{\\rtf1\\ansi \\u-10179\\u-8704\\par}",
+    "{\\rtf1\\ansi \\u-10179?\\u-8704?\\par}", "{\\rtf1\\ansi \\uc2\\u20013\\'d6\\'d0 x\\par}", "{\\rtf1\\ansi \\b bold \\i both\\i0 bold\\b0 plain\\par}", "{\\rtf1\\ansi \\i \\ul \\strike all\\plain none\\par}",
+    "{\\rtf1\\ansi one\\par\\par}", "{\\rtf1\\ansi a\\tab b\\~c\\_d\\-e\\par}", "{\\rtf1\\ansi \\{x\\}\\\\y < & \"\\par}", "{\\rtf1\\ansi {\\b bold} plain\\par}", "{\\rtf1\\ansi broken",
+    "{\\rtf1\\ansi \\b bold", "{\\rtf1\\ansi a} extra\\par}", "\\rtf1 no groups", "{\\rtf1\\ansi\\ansicpg1252\\deff0 {\\fonttbl{\\f0 Arial;}}{\\colortbl;\\red0\\green0\\blue0;}{\\*\\generator x}{\\info{\\title T}}\\pard Visible{\\footnote note}\\par}",
+    "{\\rtf1\\ansi\\ansicpg1251 \\'cf\\'f0\\'e8\\'e2\\'e5\\'f2\\par}", "{\\rtf1\\ansi\\ansicpg936 \\'d6\\'d0\\'ce\\'c4\\par}", "{\\rtf1\\ansi\\ansicpg932 \\'82\\'a0\\par}",
+    "{\\rtf1\\ansi\\ansicpg65001 \\'e2\\'82\\'ac\\par}", "{\\rtf1\\ansi\\ansicpg65001 \\'ef\\'bb\\'bfBOM\\par}", "{\\rtf1\\ansi\\ansicpg949 \\'c7\\'d1 \\par}", "{\\rtf1\\ansi\\ansicpg99999 \\'e4\\par}",
+    "{\\rtf1\\ansi \\b\\i x\\b0 y\\i0 z\\par}", "{\\rtf1\\ansi \\b x\\pard y\\plain z\\par}", "{\\rtf1\\ansi a\\'zz b\\'4\\par}", "{\\rtf1\\ansi \\uc1\\u8364\\'80 euro\\par}",
+    "{\\rtf1\\ansi \\u65 \\u66\\u67 x\\par}", "{\\rtf1\\ansi {\\*\\ignored {\\b nested}} after\\par}", "{\\rtf1\\ansi {\\pict\\pngblip 89504e47} text\\par}", "{\\rtf1\\ansi \\b {\\i inner} \\par next\\par}",
+    new Uint8Array([...strToU8("{\\rtf1\\ansi\\ansicpg1252 raw "), 0xe4, 0xf6, ...strToU8("\\par}")]), new Uint8Array([...strToU8("{\\rtf1\\ansi\\ansicpg65001 raw "), 0xe2, 0x82, 0xac, ...strToU8("\\par}")])
+  ];
+  const rtf = rtfInputs.map((input) => {
+    const bytes = typeof input === "string" ? enc.encode(input) : input;
+    return { input: b64(bytes), html: rtfToHtml(bytes) };
+  });
+  const r = (text: string) => `{\\rtf1\\ansi\\ansicpg1252\\deff0 {\\fonttbl{\\f0 Arial;}}\\pard ${text}\\par}`;
+  const item = (type: string, attrs: string, title: string, children: string[] = [], meta = "") => `<BinderItem ${attrs} Type="${type}"><Title>${title}</Title>${meta}${children.length ? `<Children>${children.join("")}</Children>` : ""}</BinderItem>`;
+  const scene = (id: string, title: string, children: string[] = [], ext?: string) => item("Text", `ID="${id}"`, title, children, ext ? `<MetaData><FileExtension>${ext}</FileExtension></MetaData>` : "");
+  const folder = (id: string, title: string, children: string[] = []) => item("Folder", `ID="${id}"`, title, children);
+  const scrivx = (...items: Array<string | string[]>) => `<ScrivenerProject Version="1.0"><Binder>${items.flat().join("")}</Binder></ScrivenerProject>`;
+  const draft = (children: string[] = []) => item("DraftFolder", 'ID="1"', "Manuscript", children);
+  const research = (children: string[] = []) => item("ResearchFolder", 'ID="2"', "Research", children);
+  const projects: Record<string, { files: Record<string, string>; projectName?: string }> = {
+    docs: { files: { "project.scrivx": scrivx(draft([scene("5", "Opening")])), "Files/Docs/1_synopsis.txt": "Draft overview.", "Files/Docs/5.rtf": r("First scene."), "Files/Docs/5_synopsis.txt": "  A short\r\nsynopsis  ", "Files/Docs/5_notes.rtf": r("A note") } },
+    data: { files: { "project.scrivx": scrivx(item("DraftFolder", 'UUID="D"', "Draft", [item("Text", 'UUID="A"', "Alpha"), item("Folder", 'UUID="F"', "Part One", [item("Text", 'UUID="B"', "Beta")])])), "Files/Data/A/content.rtf": r("Alpha text \\b bold\\b0 ."), "Files/Data/B/content.rtf": r("Beta text."), "Files/Data/F/synopsis.txt": "Part synopsis", "Files/Data/B/notes.rtf": r("n") } },
+    folders: { files: { "project.scrivx": scrivx(draft([folder("10", "Chapter One", [scene("11", "Scene A"), scene("12", "Scene B", [scene("13", "Child")])]), folder("20", "Chapter Two", [folder("21", "Nested", [scene("22", "Deep")])]), scene("30", "Loose"), item("Image", 'ID="40"', "Picture")])), "Files/Docs/10.rtf": r("Folder text."), "Files/Docs/11.rtf": r("A."), "Files/Docs/12.rtf": r("B."), "Files/Docs/13.rtf": r("C."), "Files/Docs/22.rtf": r("D."), "Files/Docs/30.rtf": r("L.") } },
+    wiki: { files: { "project.scrivx": scrivx(draft([scene("5", "S")]), research([folder("60", "People", [scene("61", "Mara", [scene("62", "Sub")])]), scene("63", "Loose page"), item("PDF", 'ID="64"', "Paper")]), folder("70", "Other Stuff", [scene("71", "Idea")]), scene("80", "Top note"), item("TrashFolder", 'ID="3"', "Trash", [scene("90", "Deleted")]), research([scene("95", "Second research")])), "Files/Docs/5.rtf": r("S."), "Files/Docs/61.rtf": r("Mara text."), "Files/Docs/63.rtf": r("Page."), "Files/Docs/71.rtf": r("Idea."), "Files/Docs/80.rtf": r("Note."), "Files/Docs/90.rtf": r("Gone."), "Files/Docs/62_notes.rtf": r("x") } },
+    missing: { files: { "project.scrivx": scrivx(draft([scene("5", "Edited", [], "rtf"), scene("6", "Never edited"), scene("7", "Broken", [], "rtf")])), "Files/Docs/7.rtf": "not rtf at all \u0000" } },
+    empty: { files: { "project.scrivx": scrivx(draft([])) } },
+    "draft-text": { files: { "project.scrivx": scrivx(draft([scene("5", "One")])), "Files/Docs/1.rtf": r("Draft's own text."), "Files/Docs/5.rtf": r("One.") } },
+    wrapped: { files: { "My Novel.scriv/project.scrivx": scrivx(draft([scene("5", "Opening")])), "My Novel.scriv/Files/Docs/5.rtf": r("Wrapped."), "Other/project.scrivx": "<x/>" } },
+    named: { files: { "project.scrivx": scrivx(draft([scene("5", "  Spaced\n title  ")])), "Files/Docs/5.rtf": r("x") }, projectName: "  Given Name.scriv " },
+    untitled: { files: { "project.scrivx": scrivx(item("DraftFolder", 'ID="1"', "", [item("Text", 'ID="5"', ""), item("Folder", 'ID="6"', "")])) } },
+    "long-synopsis": { files: { "project.scrivx": scrivx(draft([folder("6", "F", [scene("7", "s")])])), "Files/Docs/6_synopsis.txt": "word ".repeat(1000), "Files/Docs/7.rtf": r("x") } },
+    "bad-xml": { files: { "project.scrivx": "<ScrivenerProject><Binder>" } },
+    "no-binder": { files: { "project.scrivx": "<ScrivenerProject/>" } },
+    "no-scrivx": { files: { "Files/Docs/1.rtf": r("x") } }
+  };
+  const scrivener = Object.entries(projects).map(([name, spec]) => {
+    let n = 0;
+    const entries = Object.entries(spec.files).map(([path, text]) => ({ path, bytes: enc.encode(text) }));
+    let result: unknown = null;
+    let error: string | null = null;
+    try {
+      result = buildScrivenerProject(scrivenerFilesFromEntries(entries), { createId: () => `id-${++n}`, ...(spec.projectName ? { projectName: spec.projectName } : {}) });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    return { name, files: entries.map((e) => ({ path: e.path, bytes: b64(e.bytes) })), projectName: spec.projectName ?? null, result, error };
+  });
+  const zips = [
+    { name: "zip", data: zipSync({ "Novel.scriv/project.scrivx": strToU8(scrivx(draft([scene("5", "Zipped")]))), "Novel.scriv/Files/Docs/5.rtf": strToU8(r("From a zip.")), "__MACOSX/Novel.scriv/._x": strToU8("junk"), "Novel.scriv/.DS_Store": strToU8("junk") }) },
+    { name: "zip-traversal", data: zipSync({ "../evil/project.scrivx": strToU8(scrivx(draft([]))) }) },
+    { name: "zip-absolute", data: zipSync({ "/abs/project.scrivx": strToU8(scrivx(draft([]))) }) },
+    { name: "not-zip", data: strToU8("not a zip") }
+  ].map(({ name, data }) => {
+    let n = 0;
+    let result: unknown = null;
+    let error: string | null = null;
+    try {
+      result = buildScrivenerProject(scrivenerFilesFromZip(data), { createId: () => `id-${++n}` });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    return { name, zip: b64(data), result, error };
+  });
+  write("scrivener-import.json", { rtf, scrivener, zips });
+});
