@@ -999,3 +999,39 @@ it.skipIf(!OUT)("writes custom starter fixtures", async () => {
   const template = filterBlueprint(working, new Set(keys.filter((_, i) => i % 3 !== 1)));
   write("custom-starters.json", { key: CUSTOM_STARTERS_KEY, stored, normalized, saved, working, template });
 });
+
+it.skipIf(!OUT)("writes Markdown (marked) fixtures", async () => {
+  const { markdownToHtml, markdownToDocument } = await import("$lib/publish/markdown");
+  const { marked } = await import("marked");
+  const spec = JSON.parse(readFileSync(join(__dirname, "lib/commonmark-spec.gen.json"), "utf8")) as Array<{ markdown: string; example: number; section: string }>;
+  const own = [
+    "Text with a footnote[^n1] and another[^n-2].\n\n[^n1]: The *first* note.\n[^n-2]: Second note\n    continued line.\n",
+    "[^bad id!]: not a footnote\n\nText[^missing].\n",
+    "Inline $x^2$ and $$display$$ and \\(paren\\) math, but $5 and $ 5 and 5$ are money.\n\n$$\nE = mc^2\n$$\n\n\\[\na + b\n\\]\n",
+    "As shown [@smith2020, p. 4; @jones] and [see @doe2019] but not [plain] or [link](x) or [@a][b] or [^fn].\n",
+    "```mermaid\ngraph TD; A-->B;\n```\n\n```calc\n1 + 2\n```\n\n```mathcad\nx := 3\n```\n\n```js\nconst a = 1;\n```\n",
+    "# Title\n\nA paragraph with **bold**, *italic*, ~~strike~~, `code` and a [link](https://example.com \"T\").\n\n> Quote\n\n- one\n- two\n\n1. a\n2. b\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n---\n\n![img](data:image/png;base64,AA==)\n",
+    "* * *\n\nText after a scene break.\n\n<div class=\"x\">raw html</div>\n\nwww.example.com and https://autolink.org/path?q=1.\n",
+    "Line one  \nLine two\\\nLine three\n\n- [ ] task\n- [x] done\n"
+  ];
+  const fromExports: string[] = [];
+  for (const file of ["export-markdown.json"]) {
+    try {
+      const data = JSON.parse(readFileSync(join(OUT!, file), "utf8"));
+      for (const value of Object.values(data.exports ?? {})) fromExports.push((value as { markdown: string }).markdown);
+    } catch { /* not generated yet */ }
+  }
+  const tree = (tokens: unknown[]): unknown[] => (tokens as Array<Record<string, unknown>>).map((t) => {
+    const node: Record<string, unknown> = { type: t.type, raw: t.raw };
+    if (Array.isArray(t.tokens)) node.tokens = tree(t.tokens);
+    if (Array.isArray(t.items)) node.items = tree(t.items);
+    return node;
+  });
+  const inputs = [...spec.map((s) => s.markdown), ...own, ...fromExports];
+  const cases = inputs.map((markdown) => {
+    const html = markdownToHtml(markdown);
+    const doc = markdownToDocument(markdown);
+    return { markdown, html, document: doc, tokens: tree(marked.lexer(markdown)) };
+  });
+  write("marked.json", { cases });
+});
