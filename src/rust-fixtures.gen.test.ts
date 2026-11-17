@@ -754,6 +754,23 @@ it.skipIf(!OUT)("writes EPUB import fixtures", async () => {
     { name: "only-furniture", data: makeEpub({ manifest: [navItem, { id: "cover", href: "cover.xhtml" }], spine: ["nav", "cover"], files: { "OEBPS/nav.xhtml": nav('<li><a href="cover.xhtml">Cover</a></li>'), "OEBPS/cover.xhtml": xhtml("<p>Cover art</p>") } }) },
     { name: "html-fallback", data: makeEpub({ creator: "One", metadata: "<dc:creator>  Two  Names </dc:creator>", manifest: [navItem, { id: "ch1", href: "ch%201.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch%201.xhtml#s2">  Second\n  Half </a></li><li><a href="ch%201.xhtml">First Half</a></li>'), "OEBPS/ch 1.xhtml": `<html><body><h1>First Half</h1><p>Caf&eacute; &nbsp;au lait<p>Unclosed para<br>line<section><p id="s2">Second&nbsp;half text.</p><blockquote>Quoted <b>bold</b></blockquote></section></body></html>` } }) }
   ];
+  // Books ProseCraft itself exported, read back.
+  const exported = bookProject();
+  const exportVariants: Record<string, Record<string, unknown>> = {
+    defaults: {},
+    everything: { style: "modern", includeTableOfContents: true, includeSceneTitles: true, includeCopyrightPage: true, sceneSeparator: "asterisks", subtitle: "A Novel <&>", copyright: "© 2026 A. Writer", dedication: "For the keepers.", frontMatter: [{ id: "f1", title: "Epigraph", body: "Some words." }], backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }] },
+    ebook: { style: "ebook", sceneSeparator: "line", includeTitlePage: false, includeChapterTitles: false }
+  };
+  for (const [variant, raw] of Object.entries(exportVariants)) {
+    const options = normalizePublishOptions(raw);
+    const book = compileBook({
+      title: exported.name, author: exported.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: exported.chapters.filter((c) => !c.trashed), documents: exported.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    const payload = await exportEpub(book, options);
+    cases.push({ name: `exported-${variant}`, data: new Uint8Array(await payload.blob.arrayBuffer()), fallbackTitle: "exported.epub" });
+  }
   const results = [];
   for (const c of cases) {
     let result: unknown = null;
