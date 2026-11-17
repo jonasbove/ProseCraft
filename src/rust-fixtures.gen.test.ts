@@ -27,6 +27,8 @@ import { commentText } from "$lib/comment-dom";
 import { buildAnchor, locateAnchor } from "$lib/comments";
 import { STARTERS, STARTER_MODULES, starterBlueprint, buildFromBlueprint, addModule, allBlueprintKeys, type StarterBlueprint } from "$lib/starters";
 import { defaultPublishOptions } from "$lib/publish/types";
+import { searchDocuments, findFirstMatch } from "$lib/search";
+import { replaceInDocuments } from "$lib/replace";
 import { unzipSync, strFromU8 } from "fflate";
 import { exportMarkdown, htmlToInlineMarkdown, htmlToMarkdown } from "$lib/publish/markdown";
 import { sanitizeInlineHtml } from "$lib/sanitize";
@@ -636,4 +638,31 @@ it.skipIf(!OUT)("writes starter data and fixtures", async () => {
     screenplay: { blueprint: screenplay, keys: [...allBlueprintKeys(screenplay)], build: buildFromBlueprint(screenplay, counter()) },
     fantasyPlusFactions: addModule(starterBlueprint("fantasy"), "factions")
   });
+});
+
+it.skipIf(!OUT)("writes search and replace fixtures", async () => {
+  const base = bookProject();
+  const documents = [
+    ...base.documents,
+    { id: "s1", title: "Käpten's log", chapterId: "chapter-1", content: "<p>The Kapten met the käpten. KAPTEN!</p><p>Cat, catalogue, the cat's hat. 🌊 cat</p>" },
+    { id: "s2", title: "Spanning", chapterId: "chapter-3", content: "<p>It was da<em>rk</em> and dark &amp; darker.</p>", markdownSource: "It was da*rk*" },
+    { id: "s3", title: "Trashed dark", chapterId: "chapter-1", content: "<p>dark dark</p>", trashed: true },
+    { id: "w1", title: "Dark lore", space: "Wiki", content: "<p>Notes about the dark tower. 한국어 dark.</p>" },
+    { id: "x1", title: "Loose", content: "<p>dark but in no chapter</p>" }
+  ];
+  const chapters = base.chapters;
+  const queries: Array<[string, Record<string, boolean>]> = [
+    ["dark", {}], ["Dark", { caseSensitive: true }], ["dark", { wholeWord: true }], ["kapten", {}], ["KAPTEN", { caseSensitive: true }],
+    ["cat", { wholeWord: true }], ["cat", {}], ["dark", { includeTrashed: true }], ["  the  ", {}], ["🌊", {}], ["", {}], ["nothing here", {}], ["한국어", {}], ["&", {}]
+  ];
+  const searches = queries.map(([query, options]) => ({ query, options, hits: searchDocuments(documents as never, chapters as never, query, options) }));
+  const replaces = [
+    ["dark", "light", {}], ["dark", "", { wholeWord: true }], ["kapten", "Captain", {}], ["Dark", "Night", { caseSensitive: true, includeTitles: true }], ["dark", "x", { includeTrashed: true }], ["&", "and", {}]
+  ].map(([query, replacement, options]) => {
+    const result = replaceInDocuments(documents as never, query as string, replacement as string, options as never);
+    return { query, replacement, options, changed: result.changed, total: result.total, documents: result.documents.filter((d) => result.changed.some((c) => c.id === (d as { id: string }).id)) };
+  });
+  const only = replaceInDocuments(documents as never, "dark", "light", {}, new Set(["s2", "w1"]));
+  const firsts = [["The Käpten sails", "kapten", {}], ["a cat and the cat", "cat", { wholeWord: true }], ["concatenate", "cat", { wholeWord: true }], ["Ünïcödé text", "unicode", {}], ["x", "", {}]].map(([text, query, options]) => ({ text, query, options, match: findFirstMatch(text as string, query as string, options as never) }));
+  write("search.json", { documents, chapters, searches, replaces, only: { changed: only.changed, total: only.total }, firsts });
 });
