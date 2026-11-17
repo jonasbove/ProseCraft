@@ -14,7 +14,7 @@ import { createVault, deriveKek, encryptEntity, type EntityMetaPlain } from "$li
 import { serializeEncryptedBundle } from "$lib/storage/encrypted-bundle";
 import { countWords, htmlToPlainText } from "$lib/publish/content";
 import { sanitizeHtml } from "$lib/sanitize";
-import { createStoredProject, stableStringify } from "$lib/storage/schema";
+import { createStoredProject, projectContentKey, stableStringify, stampProject } from "$lib/storage/schema";
 import { SCHEMA_VERSION, type ProjectData } from "$lib/storage/types";
 
 const OUT = process.env.PROSECRAFT_FIXTURE_OUT;
@@ -218,4 +218,24 @@ it.skipIf(!OUT)("writes plain-text and word-count fixtures", () => {
     const omit = htmlToPlainText(clean, { rich: "omit" });
     return { input, clean, omit, source: htmlToPlainText(clean, { rich: "source" }), words: countWords(omit) };
   }));
+});
+
+it.skipIf(!OUT)("writes stamping fixtures", () => {
+  const base = richProject();
+  const created = createStoredProject(base, "device-a", 1_000);
+  const steps: Array<{ name: string; previous: unknown; project: unknown; device: string; now: number; result: unknown }> = [];
+  const step = (name: string, previous: ReturnType<typeof createStoredProject> | undefined, project: ProjectData, device: string, now: number) => {
+    const result = stampProject(previous, project, device, now);
+    steps.push({ name, previous: previous ?? null, project, device, now, result });
+    return result;
+  };
+  const same = step("unchanged", created, structuredClone(created.project), "device-b", 2_000);
+  const edited = step("edit one scene", same, { ...same.project, documents: same.project.documents.map((d) => d.id === "doc-1" ? { ...d, content: "<p>It was very dark.</p>" } : d) }, "device-b", 3_000);
+  const removed = step("remove a scene", edited, { ...edited.project, documents: edited.project.documents.filter((d) => d.id !== "doc-3") }, "device-a", 4_000);
+  const again = step("tombstone kept", removed, structuredClone(removed.project), "device-a", 5_000);
+  const readded = step("re-add the scene", again, { ...again.project, documents: [...again.project.documents, base.documents[2]] }, "device-c", 6_000);
+  step("rename project", readded, { ...readded.project, name: "Renamed" }, "device-c", 7_000);
+  step("active document only", readded, { ...readded.project, activeDocumentId: "doc-2" }, "device-c", 8_000);
+  step("new project", undefined, base, "device-z", 9_000);
+  write("stamping.json", { created, steps, contentKey: projectContentKey(base) });
 });
