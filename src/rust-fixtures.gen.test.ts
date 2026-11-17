@@ -1260,3 +1260,28 @@ it.skipIf(!OUT)("writes Markdown folder import fixtures", async () => {
   }
   write("markdown-folder.json", { frontmatter, names, paths, suggest, folderSets, roleCases, estimates: { files: estimateFiles, cases: estimates }, builds });
 });
+
+it.skipIf(!OUT)("writes CSL normalization fixtures", async () => {
+  const { normalizeCslItemsDetailed, sanitizeCitationId } = await import("$lib/citations/csl");
+  const big = (n: number) => "é".repeat(n);
+  const inputs: unknown[] = [
+    [{ id: "smith2020", type: "book", title: "  The   Long\tRoad\n ", author: [{ family: "Smith", given: "Ann" }], issued: { "date-parts": [[2020, 5, 1]] } }],
+    [{ type: "article-journal", title: "No id here", author: [{ family: "Ångström", given: "A." }], issued: { "date-parts": [["2019"]] }, "container-title": "Journal", volume: 12, issue: 3.5, page: "1-10", DOI: "10.1/x", URL: "https://example.com/a b" }],
+    [{ type: "book", title: "Same" }, { type: "book", title: "Same" }, { id: "dup", type: "book", title: "A" }, { id: "dup", type: "book", title: "B" }, { id: "dup", type: "book", title: "C" }],
+    [{ id: "x", type: "BOOK", title: "upper type" }, { id: "y", type: "9book", title: "bad type" }, { id: "z", type: "book" }, "not an object", null, [1], { type: "webpage", URL: "javascript:alert(1)" }, { type: "webpage", URL: "ftp://files.example.org/a" }],
+    [{ id: 42, type: "chapter", editor: [{ literal: "The Committee" }, { family: "" }, {}, { given: "Only" }], issued: { literal: "Spring 1999", season: 2, circa: true } }],
+    [{ id: "  we!rd id // with spaces--and--dashes.. ", type: "book", title: "x" }, { id: "-./", type: "book", title: "Fallback after empty sanitized id" }],
+    [{ type: "thesis", "abstract": "Line one\r\nLine two\u0001", title: "T", issued: { "date-parts": [[2001, "Jan", 1, 9], [2002], [2003]], raw: "2001" } }],
+    [{ type: "book", title: big(2100), publisher: big(1200), "container-title": "C\u0000ontrol\u0007chars", citeKey: "key", provider: "zotero", language: "en", ISBN: "978", edition: 2, "publisher-place": "Oslo" }],
+    [{ type: "report", issued: { "date-parts": [[1.5, 2]], season: "Summer" } }, { type: "report", issued: { "date-parts": "bad" } }, { type: "report", author: "nope", title: "Anon" }],
+    "not an array",
+    [],
+    [{ id: "a".repeat(200), type: "book", title: "Long id" }, { id: "a".repeat(200), type: "book", title: "Long id again" }],
+    [{ type: "book", title: "🌊 Waves and more", author: [{ family: "Ōe" }] }, { type: "book", title: "   " }, { type: "book", DOI: "10.2/y" }]
+  ];
+  const cases = inputs.map((input) => ({ input, output: normalizeCslItemsDetailed(input) }));
+  const ids = ["  Smith 2020!!", "a..b", "-x-", "日本", "a\u0001b", "x".repeat(140), "./weird/.", "keep:this/one-1"].map((raw) => ({ raw, id: sanitizeCitationId(raw) }));
+  const many = Array.from({ length: 5003 }, (_, i) => ({ id: `r${i}`, type: "book", title: `T${i}` }));
+  const capped = normalizeCslItemsDetailed(many);
+  write("csl.json", { cases, ids, capped: { count: capped.items.length, last: capped.items[capped.items.length - 1], warnings: capped.warnings } });
+});
