@@ -1432,3 +1432,9 @@ it.skipIf(!OUT)("writes citation formatting fixtures", async () => {
   }
   write("citations-format.json", { library, variants, styles });
 });
+
+/** ProseCraft's citation styles and locale terms, for prosecraft-rs to embed as data. */
+it.skipIf(!OUT)("writes citation style data", async () => {
+  const { STYLES, STYLE_TEMPLATES, LOCALE_TERMS } = await import("$lib/citations/styles");
+  write("citation-styles.json", { styles: STYLES, templates: STYLE_TEMPLATES, terms: LOCALE_TERMS });
+});
