@@ -963,3 +963,39 @@ Hello?
   const converted = convertDocumentToScreenplay({ id: "d1", title: "Prose", content: prose[0], chapterId: "c1", markdownSource: "Mara: x", labelId: "l1" } as never);
   write("fountain.json", { cases, keys, detect, cased, wraps, documents, chapters, books, conversions, converted });
 });
+
+it.skipIf(!OUT)("writes custom starter fixtures", async () => {
+  const { normalizeCustomStarters, saveCustomStarters, CUSTOM_STARTERS_KEY, addCustomFolder, addCustomPage, renameCustomFolder, renameCustomPage, removeCustomPage, removeCustomFolder, starterBlueprint, filterBlueprint, allBlueprintKeys } = await import("$lib/starters");
+  const stored = [
+    { id: "a", name: "  Fantasy mine  ", blueprint: { folders: [
+      { key: "module:magic", name: "Magic", pages: [{ key: "x", title: " Spell ", html: "<p onclick=\"x\">Fire</p><b>bold</b>" }, { title: "", html: 5 }, "junk", null] },
+      { key: "module:magic", name: "Magic again", pages: [{ title: "Dup module" }] },
+      { key: "module:unknown", name: "", pages: "nope" },
+      { key: "folder:9", name: "People", pages: [{ title: "A".repeat(200), html: "<p>" + "x".repeat(60000) + "</p>" }] },
+      "not a folder"
+    ] } },
+    { id: "a", name: "Duplicate id", blueprint: { folders: [] } },
+    { id: "", name: "No id", blueprint: { folders: [] } },
+    { id: "b", name: "", blueprint: { folders: "no" } },
+    { id: "c", blueprint: { folders: Array.from({ length: 45 }, (_, i) => ({ name: `F${i}`, pages: Array.from({ length: 6 }, (_, j) => ({ title: `P${i}.${j}` })) })) } },
+    null, 7, { id: "d", name: 12, blueprint: { folders: [{ name: "Only", pages: [] }] } },
+    ...Array.from({ length: 25 }, (_, i) => ({ id: `many-${i}`, name: `T${i}`, blueprint: { folders: [] } }))
+  ];
+  const normalized = normalizeCustomStarters(stored);
+  let saved = "";
+  saveCustomStarters({ setItem: (_key: string, value: string) => { saved = value; } } as never, normalized);
+  let working = starterBlueprint("fantasy");
+  working = addCustomFolder(working, "  My folder ");
+  const folderKey = working.folders[working.folders.length - 1].key;
+  working = addCustomPage(working, folderKey, " Page one ", "<p>Hi</p>");
+  working = addCustomPage(working, folderKey, "");
+  working = addCustomFolder(working, "");
+  working = renameCustomFolder(working, folderKey, " Renamed ");
+  const pageKey = working.folders.find((f) => f.key === folderKey)!.pages[0].key;
+  working = renameCustomPage(working, pageKey, "   ");
+  working = removeCustomPage(working, working.folders.find((f) => f.key === folderKey)!.pages[1].key);
+  working = removeCustomFolder(working, working.folders[0].key);
+  const keys = [...allBlueprintKeys(working)];
+  const template = filterBlueprint(working, new Set(keys.filter((_, i) => i % 3 !== 1)));
+  write("custom-starters.json", { key: CUSTOM_STARTERS_KEY, stored, normalized, saved, working, template });
+});
