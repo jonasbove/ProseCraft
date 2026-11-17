@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { afterAll, beforeAll, it, vi } from "vitest";
 import { createVault, deriveKek, encryptEntity, type EntityMetaPlain } from "$lib/storage/crypto";
 import { serializeEncryptedBundle } from "$lib/storage/encrypted-bundle";
+import { countWords, htmlToPlainText } from "$lib/publish/content";
+import { sanitizeHtml } from "$lib/sanitize";
 import { createStoredProject, stableStringify } from "$lib/storage/schema";
 import { SCHEMA_VERSION, type ProjectData } from "$lib/storage/types";
 
@@ -193,4 +195,27 @@ it.skipIf(!OUT)("writes bundle fixtures", async () => {
   const encrypted = serializeEncryptedBundle([project, second], header, vaultKey, "device-a", 1_763_370_000_000, "the usual");
   writeFileSync(join(OUT!, "bundle-encrypted.prosecraft"), encrypted);
   write("bundle-encrypted.key.json", { passphrase, vaultKey: hex(vaultKey) });
+});
+
+it.skipIf(!OUT)("writes plain-text and word-count fixtures", () => {
+  const html = [
+    ...richProject().documents.map((document) => document.content),
+    "<p>One  two\tthree</p><p>  </p><p>four<br>five</p>",
+    "<h1>Title</h1><blockquote><p>Quoted <em>words</em> here</p></blockquote><hr><p>after</p>",
+    "<ul><li>first item</li><li>second <strong>bold</strong></li></ul><ol><li>one</li><li><p>two</p></li></ol>",
+    "<p>a&nbsp;b &amp; c&lt;d&gt; &#x1F600; &mdash;</p><p>\u00a0\u2003\ufeff\u0085x</p>",
+    '<p>Math <span class="math-inline" data-tex="x^2"></span> inline.</p><div class="math-block" data-tex="E=mc^2"></div><div class="mermaid-diagram" data-source="graph TD; A--&gt;B"></div><p>end</p>',
+    '<p>Note<sup class="footnote-ref" data-footnote-id="fn-1" contenteditable="false"></sup> here.</p>',
+    "<div><div>nested <div>blocks</div> text</div></div><pre>code\n  kept</pre>",
+    "<p>unclosed paragraph<p>second",
+    "<table><tr><td>cell one</td><td>cell two</td></tr></table>",
+    '<p><img src="data:image/png;base64,AA==" alt="pic"> caption</p>',
+    "",
+    "plain text without tags"
+  ];
+  write("plain-text.json", html.map((input) => {
+    const clean = sanitizeHtml(input);
+    const omit = htmlToPlainText(clean, { rich: "omit" });
+    return { input, clean, omit, source: htmlToPlainText(clean, { rich: "source" }), words: countWords(omit) };
+  }));
 });
