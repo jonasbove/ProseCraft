@@ -666,3 +666,107 @@ it.skipIf(!OUT)("writes search and replace fixtures", async () => {
   const firsts = [["The Käpten sails", "kapten", {}], ["a cat and the cat", "cat", { wholeWord: true }], ["concatenate", "cat", { wholeWord: true }], ["Ünïcödé text", "unicode", {}], ["x", "", {}]].map(([text, query, options]) => ({ text, query, options, match: findFirstMatch(text as string, query as string, options as never) }));
   write("search.json", { documents, chapters, searches, replaces, only: { changed: only.changed, total: only.total }, firsts });
 });
+
+it.skipIf(!OUT)("writes EPUB import fixtures", async () => {
+  const { parseEpub, buildEpubProject } = await import("$lib/import/epub");
+  const { strToU8, zipSync } = await import("fflate");
+  const { MAX_EMBEDDED_IMAGE_BYTES } = await import("$lib/sanitize");
+  type Spec = { title?: string; creator?: string; metadata?: string; manifest: { id: string; href: string; type?: string; properties?: string; linear?: string }[]; spine: string[]; ncx?: string; guide?: string; files: Record<string, string | Uint8Array> };
+  const CONTAINER = `<?xml version="1.0" encoding="utf-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`;
+  const packageDocument = (spec: Spec) => {
+    const metadata = [spec.title === undefined ? "" : `<dc:title>${spec.title}</dc:title>`, spec.creator === undefined ? "" : `<dc:creator>${spec.creator}</dc:creator>`, spec.metadata ?? ""].join("");
+    const manifest = spec.manifest.map((item) => `<item id="${item.id}" href="${item.href}" media-type="${item.type ?? "application/xhtml+xml"}"${item.properties ? ` properties="${item.properties}"` : ""}/>`).join("\n    ");
+    const spine = spec.spine.map((id) => {
+      const linear = spec.manifest.find((m) => m.id === id)?.linear;
+      return `<itemref idref="${id}"${linear ? ` linear="${linear}"` : ""}/>`;
+    }).join("\n    ");
+    return `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">test-book</dc:identifier>
+    ${metadata}
+  </metadata>
+  <manifest>
+    ${manifest}
+  </manifest>
+  <spine${spec.ncx ? ` toc="${spec.ncx}"` : ""}>
+    ${spine}
+  </spine>
+  ${spec.guide ?? ""}
+</package>`;
+  };
+  const makeEpub = (spec: Spec): Uint8Array => {
+    const files: Record<string, Uint8Array> = { "META-INF/container.xml": strToU8(CONTAINER), "OEBPS/content.opf": strToU8(packageDocument(spec)) };
+    for (const [name, value] of Object.entries(spec.files)) files[name] = typeof value === "string" ? strToU8(value) : value;
+    return zipSync(files);
+  };
+  const xhtml = (body: string) => `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Test</title></head>
+<body>${body}</body>
+</html>`;
+  const nav = (entries: string) => xhtml(`<nav epub:type="toc"><ol>${entries}</ol></nav>`);
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02]);
+  const GIF = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+  const huge = new Uint8Array(MAX_EMBEDDED_IMAGE_BYTES + 1).fill(0x42);
+  const navItem = { id: "nav", href: "nav.xhtml", properties: "nav" };
+  const cases: Array<{ name: string; data: Uint8Array; fallbackTitle?: string }> = [
+    { name: "nav-and-metadata", data: makeEpub({ title: "A Test Book", creator: "Ada Lovelace", manifest: [navItem, { id: "cover", href: "cover.xhtml" }, { id: "title-page", href: "title-page.xhtml" }, { id: "ch1", href: "ch1.xhtml" }, { id: "ch2", href: "ch2.xhtml" }], spine: ["nav", "cover", "title-page", "ch1", "ch2"], guide: `<guide><reference type="title-page" href="title-page.xhtml"/></guide>`, files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li><li><a href="ch2.xhtml#start">Chapter Two</a></li>'), "OEBPS/cover.xhtml": xhtml("<p>Cover</p>"), "OEBPS/title-page.xhtml": xhtml("<p>Title Page</p>"), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>First <strong>scene</strong>.</p>"), "OEBPS/ch2.xhtml": xhtml('<h2 id="start">Chapter Two</h2><p>Second scene.</p>') } }) },
+    { name: "ncx", data: makeEpub({ manifest: [{ id: "ncx", href: "toc.ncx", type: "application/x-dtbncx+xml" }, { id: "ch1", href: "ch1.xhtml" }, { id: "ch2", href: "ch2.xhtml" }], spine: ["ch1", "ch2"], ncx: "ncx", files: { "OEBPS/toc.ncx": `<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="p1"><navLabel><text>Opening</text></navLabel><content src="ch1.xhtml"/>
+      <navPoint id="p1a"><navLabel><text>Opening, really</text></navLabel><content src="ch1.xhtml"/></navPoint>
+    </navPoint>
+    <navPoint id="p2"><navLabel><text>Closing</text></navLabel><content src="ch2.xhtml"/></navPoint>
+  </navMap>
+</ncx>`, "OEBPS/ch1.xhtml": xhtml("<p>Opening line.</p>"), "OEBPS/ch2.xhtml": xhtml("<p>Closing line.</p>") } }) },
+    { name: "spine-fallback", data: makeEpub({ manifest: [{ id: "alpha", href: "alpha.xhtml" }, { id: "numeric", href: "chapter1.xhtml" }, { id: "named", href: "the_lost-letters.xhtml" }, { id: "aside", href: "aside.xhtml", linear: "no" }], spine: ["alpha", "numeric", "named", "aside"], files: { "OEBPS/alpha.xhtml": xhtml("<h1>Alpha</h1><p>Alpha text.</p>"), "OEBPS/chapter1.xhtml": xhtml("<p>Numeric text.</p>"), "OEBPS/the_lost-letters.xhtml": xhtml("Loose text at the top.<p>More.</p>"), "OEBPS/aside.xhtml": xhtml("<p>Not linear.</p>") } }) },
+    { name: "scene-breaks", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>First part.</p><hr/>" + '<p>Second part.</p><p class="scene-break">* * *</p><p>Third part.</p><p>⁂</p><p>Fourth <em>part</em>.</p><div class="ornament"><img src="x.png"/></div><p>Fifth part.</p><p>---</p><p>Sixth part.</p>') } }) },
+    { name: "wrappers-and-furniture", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml#contents">Contents</a></li><li><a href="ch1.xhtml#one">Chapter One Begins</a></li>'), "OEBPS/ch1.xhtml": xhtml('<div id="contents"><h2>Contents</h2><p>Chapter One Begins</p></div><div class="chapter" id="chap01"><h2><a id="one"/>Chapter One<br/>Begins</h2><p>Body text.</p></div>') } }) },
+    { name: "title-page", data: makeEpub({ manifest: [navItem, { id: "title", href: "title.xhtml" }, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "title", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="title.xhtml#title">Book Title</a></li><li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/title.xhtml": xhtml('<h1 id="title">Book Title</h1><h2>by A. Writer</h2>'), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>Story text.</p>") } }) },
+    { name: "gutenberg-licence", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }, { id: "license", href: "backmatter.xhtml" }, { id: "ch2", href: "ch2.xhtml" }], spine: ["nav", "ch1", "license", "ch2"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li><li><a href="backmatter.xhtml">The Full Project Gutenberg™ License</a></li><li><a href="ch2.xhtml">Chapter Two</a></li>'), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>First story.</p>"), "OEBPS/backmatter.xhtml": xhtml("<h1>Licence</h1><p>Legal boilerplate.</p>"), "OEBPS/ch2.xhtml": xhtml("<h1>Chapter Two</h1><p>Second story.</p>") } }) },
+    { name: "images", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "Text/ch1.xhtml" }, { id: "map", href: "Images/pic.png", type: "image/png" }, { id: "anim", href: "Images/anim.gif", type: "image/gif" }, { id: "huge", href: "Images/huge.png", type: "image/png" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="Text/ch1.xhtml">Illustrated</a></li>'), "OEBPS/Text/ch1.xhtml": xhtml("<h1>Illustrated</h1>" + '<figure><img src="../Images/pic.png" alt="Map"/></figure>' + '<figure><svg xmlns="http://www.w3.org/2000/svg"><image xlink:href="../Images/pic.png" alt="Diagram"/></svg></figure>' + '<p><img src="../Images/anim.gif" alt="Animated"/></p>' + '<p><img src="../Images/huge.png" alt="Huge"/></p>'), "OEBPS/Images/pic.png": PNG, "OEBPS/Images/anim.gif": GIF, "OEBPS/Images/huge.png": huge } }) },
+    { name: "images-xml", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "Text/ch1.xhtml" }, { id: "map", href: "Images/pic.png", type: "image/png" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="Text/ch1.xhtml">Illustrated</a></li>'), "OEBPS/Text/ch1.xhtml": xhtml("<h1>Illustrated</h1>" + '<p>Before <img src="../Images/pic.png" alt="Map"/> after &amp; <span>more</span>.</p>' + '<figure><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><image xlink:href="../Images/pic.png"/></svg><figcaption>Caption</figcaption></figure>' + '<p><img src="data:image/gif;base64,R0lGOD"/>Kept text<a id="n1"/></p>'), "OEBPS/Images/pic.png": PNG } }) },
+    { name: "cover-meta", data: makeEpub({ title: "Covered Book", metadata: '<meta name="cover" content="cover-art"/>', manifest: [navItem, { id: "cover-art", href: "Images/art.jpg", type: "image/jpeg" }, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>Text.</p>"), "OEBPS/Images/art.jpg": new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) } }) },
+    { name: "cover-property", data: makeEpub({ title: "Property Cover", manifest: [navItem, { id: "art", href: "Images/cover.png", type: "image/png", properties: "cover-image" }, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>Text.</p>"), "OEBPS/Images/cover.png": PNG } }) },
+    { name: "cover-too-big", data: makeEpub({ title: "Huge Cover", manifest: [navItem, { id: "art", href: "Images/cover.png", type: "image/png", properties: "cover-image" }, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<h1>Chapter One</h1><p>Text.</p>"), "OEBPS/Images/cover.png": huge } }) },
+    { name: "drm", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<p>Readable text.</p>"), "META-INF/encryption.xml": `<?xml version="1.0"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData><enc:CipherData><enc:CipherReference URI="OEBPS/ch1.xhtml"/></enc:CipherData></enc:EncryptedData>
+</encryption>` } }) },
+    { name: "font-obfuscation", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<p>Readable text.</p>"), "META-INF/encryption.xml": `<?xml version="1.0"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData><enc:CipherData><enc:CipherReference URI="OEBPS/Fonts/book.otf"/></enc:CipherData></enc:EncryptedData>
+</encryption>` } }) },
+    { name: "rights", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<p>Readable text.</p>"), "META-INF/rights.xml": "<rights/>" } }) },
+    { name: "sanitized", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Safe</a></li>'), "OEBPS/ch1.xhtml": xhtml('<p onclick="steal()">Safe text.</p><p><a href="javascript:alert(1)">Bad link</a> and <a href="https://example.com/a?b=1&amp;c=2">good</a></p>') } }) },
+    { name: "not-a-zip", data: strToU8("this is not a zip") },
+    { name: "no-container", data: zipSync({ "readme.txt": strToU8("hello") }) },
+    { name: "traversal", data: zipSync({ "META-INF/container.xml": strToU8(CONTAINER), "OEBPS/content.opf": strToU8(packageDocument({ manifest: [navItem, { id: "outside", href: "../../outside.xhtml" }, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "outside", "ch1"], files: {} })), "OEBPS/nav.xhtml": strToU8(nav('<li><a href="ch1.xhtml">Chapter One</a></li>')), "OEBPS/ch1.xhtml": strToU8(xhtml("<p>Inside text.</p>")), "../../outside.xhtml": strToU8(xhtml("<p>Outside text.</p>")) }) },
+    { name: "fallback-title", fallbackTitle: "my_book.epub", data: makeEpub({ manifest: [navItem, { id: "ch1", href: "ch1.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch1.xhtml">Chapter One</a></li>'), "OEBPS/ch1.xhtml": xhtml("<p>Text.</p>") } }) },
+    { name: "only-furniture", data: makeEpub({ manifest: [navItem, { id: "cover", href: "cover.xhtml" }], spine: ["nav", "cover"], files: { "OEBPS/nav.xhtml": nav('<li><a href="cover.xhtml">Cover</a></li>'), "OEBPS/cover.xhtml": xhtml("<p>Cover art</p>") } }) },
+    { name: "html-fallback", data: makeEpub({ creator: "One", metadata: "<dc:creator>  Two  Names </dc:creator>", manifest: [navItem, { id: "ch1", href: "ch%201.xhtml" }], spine: ["nav", "ch1"], files: { "OEBPS/nav.xhtml": nav('<li><a href="ch%201.xhtml#s2">  Second\n  Half </a></li><li><a href="ch%201.xhtml">First Half</a></li>'), "OEBPS/ch 1.xhtml": `<html><body><h1>First Half</h1><p>Caf&eacute; &nbsp;au lait<p>Unclosed para<br>line<section><p id="s2">Second&nbsp;half text.</p><blockquote>Quoted <b>bold</b></blockquote></section></body></html>` } }) }
+  ];
+  const results = [];
+  for (const c of cases) {
+    let result: unknown = null;
+    let error: string | null = null;
+    try {
+      result = await parseEpub(c.data, c.fallbackTitle ? { fallbackTitle: c.fallbackTitle } : {});
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    results.push({ name: c.name, epub: Buffer.from(c.data).toString("base64"), fallbackTitle: c.fallbackTitle ?? null, result, error });
+  }
+  let n = 0;
+  const manuscript = await parseEpub(cases.find((c) => c.name === "cover-meta")!.data);
+  const project = buildEpubProject(manuscript, { createId: () => `id-${++n}` });
+  write("epub-import.json", { cases: results, project });
+});
