@@ -25,6 +25,8 @@ import { mergeProjects } from "$lib/storage/sync/merge";
 import { safeName } from "$lib/storage/sync/layout";
 import { commentText } from "$lib/comment-dom";
 import { buildAnchor, locateAnchor } from "$lib/comments";
+import { STARTERS, STARTER_MODULES, starterBlueprint, buildFromBlueprint, addModule, allBlueprintKeys, type StarterBlueprint } from "$lib/starters";
+import { defaultPublishOptions } from "$lib/publish/types";
 import { unzipSync, strFromU8 } from "fflate";
 import { exportMarkdown, htmlToInlineMarkdown, htmlToMarkdown } from "$lib/publish/markdown";
 import { sanitizeInlineHtml } from "$lib/sanitize";
@@ -619,4 +621,19 @@ it.skipIf(!OUT)("writes comment anchor fixtures", async () => {
   const edited = "Intro. The cat sat. The cat ran! The dog sat again. 🌊 end";
   const located = anchors.filter((a) => a.anchor).map((a) => ({ anchor: a.anchor, found: locateAnchor(edited, a.anchor!) }));
   write("comments.json", { texts, sample, anchors, edited, located });
+});
+
+/** Starter data for prosecraft-rs to embed (ProseCraft's own templates), and build checks. */
+it.skipIf(!OUT)("writes starter data and fixtures", async () => {
+  const blueprints = Object.fromEntries(STARTERS.map((s) => [s.id, starterBlueprint(s.id)]));
+  write("starters-data.json", { starters: STARTERS, blueprints, modules: STARTER_MODULES, defaultPublishOptions: defaultPublishOptions() });
+  let screenplay: StarterBlueprint = { folders: [] };
+  for (const moduleId of ["characters", "places", "items"]) screenplay = addModule(screenplay, moduleId);
+  const counter = () => { let n = 0; return () => `id-${++n}`; };
+  const builds = Object.fromEntries(STARTERS.map((s) => [s.id, buildFromBlueprint(starterBlueprint(s.id), counter())]));
+  write("starters.json", {
+    builds,
+    screenplay: { blueprint: screenplay, keys: [...allBlueprintKeys(screenplay)], build: buildFromBlueprint(screenplay, counter()) },
+    fantasyPlusFactions: addModule(starterBlueprint("fantasy"), "factions")
+  });
 });
