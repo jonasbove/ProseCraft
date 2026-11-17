@@ -1376,3 +1376,59 @@ it.skipIf(!OUT)("writes open sync folder fixtures", async () => {
     random.mockRestore();
   }
 });
+
+it.skipIf(!OUT)("writes citation formatting fixtures", async () => {
+  const { formatCitation, formatBibliography, computeDisambiguation } = await import("$lib/citations/format");
+  const { STYLES } = await import("$lib/citations/styles");
+  const a = (family: string, given?: string, extra: Record<string, string> = {}) => ({ family, ...(given ? { given } : {}), ...extra });
+  const library = [
+    { id: "smith2020", type: "book", title: "The Lighthouse Keeper", author: [a("Smith", "Jo Ann")], issued: { "date-parts": [[2020]] }, publisher: "Harbour Press", "publisher-place": "Bristol", edition: "2" },
+    { id: "smith2020b", type: "book", title: "Another Lighthouse", author: [a("Smith", "Jo Ann")], issued: { "date-parts": [[2020]] }, publisher: "Harbour Press" },
+    { id: "doe-roe", type: "article-journal", title: "Tides and the moon", author: [a("Doe", "Jane"), a("Roe", "Richard")], issued: { "date-parts": [[2019, 4]] }, "container-title": "Journal of Sea Studies", volume: "12", issue: "3", page: "101-120", DOI: "https://doi.org/10.1000/xyz123" },
+    { id: "three", type: "article-journal", title: "Three authors", author: [a("Alpha", "A."), a("Beta", "B. C."), a("Gamma", "G.")], issued: { "date-parts": [[2018]] }, "container-title": "Letters", volume: "5", page: "7" },
+    { id: "many", type: "article-journal", title: "Many hands make light work", author: Array.from({ length: 23 }, (_, i) => a(`Author${i + 1}`, `Given ${String.fromCharCode(65 + (i % 26))}.`)), issued: { "date-parts": [[2021, 1, 15]] }, "container-title": "Big Science", volume: "1", issue: "1", page: "1-99", URL: "https://example.org/many" },
+    { id: "vonhumboldt", type: "book", title: "Kosmos", author: [a("Humboldt", "Alexander", { "non-dropping-particle": "von" })], issued: { "date-parts": [[1845]] }, publisher: "Cotta", "publisher-place": "Stuttgart" },
+    { id: "departicle", type: "book", title: "Particles", author: [a("Gaulle", "Charles", { "dropping-particle": "de", suffix: "Jr." })], issued: { "date-parts": [[1954]] } },
+    { id: "corp", type: "report", title: "Annual report on lighthouses", author: [{ literal: "World Lighthouse Organization" }], issued: { "date-parts": [[2022]] }, publisher: "WLO", URL: "https://wlo.example.org/report" },
+    { id: "edited", type: "book", title: "Collected essays", editor: [a("Editor", "Ed"), a("Second", "Sam")], issued: { "date-parts": [[2015]] }, publisher: "Uni Press", "publisher-place": "Cambridge" },
+    { id: "chapter1", type: "chapter", title: "On beams of light", author: [a("Chapman", "Chris")], editor: [a("Editor", "Ed")], "container-title": "Collected essays", issued: { "date-parts": [[2015]] }, page: "33-58", publisher: "Uni Press", "publisher-place": "Cambridge" },
+    { id: "web", type: "webpage", title: "How lighthouses work", author: [a("Webber", "Wendy")], issued: { "date-parts": [[2023, 6, 1]] }, "container-title": "Light Blog", URL: "https://light.example.org/how" },
+    { id: "nodate", type: "book", title: "Undated wisdom", author: [a("Nobody", "N.")], publisher: "Somewhere" },
+    { id: "noauthor", type: "book", title: "Anonymous classic", issued: { "date-parts": [[1900]] } },
+    { id: "thesis", type: "thesis", title: "A thesis on fog", author: [a("Student", "Sue")], issued: { "date-parts": [[2017]] }, publisher: "Harbour University", genre: "PhD thesis" },
+    { id: "conf", type: "paper-conference", title: "Fog horns revisited", author: [a("Horn", "Harry"), a("Bell", "Belle")], issued: { "date-parts": [[2016]] }, "container-title": "Proceedings of Coastal Sound", page: "12-19", publisher: "CS Society", "publisher-place": "Oslo" },
+    { id: "umlaut", type: "book", title: "Über Leuchttürme", author: [a("Müller", "Jürgen")], issued: { "date-parts": [[2011]] }, publisher: "Verlag Meer", "publisher-place": "Kiel", language: "de" },
+    { id: "ostrom", type: "book", title: "Ångström and light", author: [a("Ångström", "Anders")], issued: { "date-parts": [[1868]] } },
+    { id: "two-same", type: "article-journal", title: "Same pair one", author: [a("Doe", "Jane"), a("Roe", "Richard")], issued: { "date-parts": [[2019]] }, "container-title": "Journal of Sea Studies", volume: "13" },
+    { id: "edition-ord", type: "book", title: "Third edition", author: [a("Ed", "Ition")], issued: { "date-parts": [[2005]] }, edition: "3", publisher: "Pub" },
+    { id: "edition-text", type: "book", title: "Revised", author: [a("Rev", "Ised")], issued: { "date-parts": [[2006]] }, edition: "Revised edition", publisher: "Pub" },
+    { id: "doi-only", type: "article-journal", title: "DOI bare", author: [a("Doi", "D.")], issued: { "date-parts": [[2024]] }, "container-title": "J", DOI: "10.5555/abc" },
+    { id: "seven", type: "article-journal", title: "Seven authors", author: Array.from({ length: 7 }, (_, i) => a(`Seven${i}`, "S.")), issued: { "date-parts": [[2012]] }, "container-title": "Septet", volume: "7", page: "77" }
+  ];
+  const variants = [
+    {},
+    { locator: "12", label: "page" },
+    { locator: "12-15", label: "page" },
+    { locator: "3", label: "chapter" },
+    { locator: "2.1", label: "section" },
+    { prefix: "see", suffix: "for details" },
+    { suppressAuthor: true },
+    { suppressAuthor: true, locator: "9", label: "page" }
+  ];
+  const styles = [];
+  for (const style of STYLES) {
+    for (const locale of ["en", "de"] as const) {
+      const yearSuffixes = computeDisambiguation(style.id, library as never, locale);
+      const bibliography = formatBibliography(style.id, library as never, locale);
+      const singles = library.map((item, i) => variants.map((v) => formatCitation(style.id, [{ item, ...v } as never], { locale, index: i + 1, yearSuffixes })));
+      const clusters = [
+        formatCitation(style.id, [{ item: library[0] }, { item: library[2], locator: "105" }, { item: library[1] }] as never, { locale, index: 4, yearSuffixes }),
+        formatCitation(style.id, [{ item: library[2] }, { item: library[17] }] as never, { locale, indices: { "doe-roe": 3, "two-same": 9 }, library: library as never }),
+        formatCitation(style.id, [{ item: library[0], prefix: "cf." }, { item: library[4], suppressAuthor: true }] as never, { locale, library: library as never }),
+        formatCitation(style.id, [] as never, { locale })
+      ];
+      styles.push({ style: style.id, locale, yearSuffixes, bibliography, singles, clusters });
+    }
+  }
+  write("citations-format.json", { library, variants, styles });
+});
