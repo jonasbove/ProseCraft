@@ -935,5 +935,17 @@ Hello?
   const detect = lines.map((line) => ({ line, type: autoDetectType(line) }));
   const cased = EDITOR_ELEMENT_TYPES.map((type) => ({ type, text: autoCase(type, "Mara's straße – ok") }));
   const wraps = [["", 10], ["one two three four five", 9], ["  spaced   words\nsecond line  ", 7], ["averyveryverylongword short", 5]].map(([text, width]) => ({ text, width, lines: wrapScreenplayText(text as string, width as number) }));
-  write("fountain.json", { cases, keys, detect, cased, wraps });
+  const { bookToFountain } = await import("$lib/screenplay/export-fountain");
+  const documents = [
+    { id: "d1", title: "Opening", chapterId: "c1", content: cases[0].html, format: "screenplay" },
+    { id: "d2", title: "Prose", chapterId: "c1", content: "<p>A <em>prose</em> scene.</p>" },
+    { id: "d3", title: "Second", chapterId: "c2", content: cases[4].html, format: "screenplay" },
+    { id: "d4", title: "Trashed", chapterId: "c2", content: cases[2].html, trashed: true }
+  ];
+  const chapters = [{ id: "c1", title: "Act One" }, { id: "c2", title: "Chapter 2" }];
+  const books = [["The Pilot", "A. Writer"], ["Untitled <&>", "  "]].map(([title, author]) => {
+    const book = compileBook({ title, author, subtitle: "", copyright: "", dedication: "", frontMatter: [], backMatter: [], chapters: chapters as never, documents: documents as never });
+    return { title, author, fountain: bookToFountain(book) };
+  });
+  write("fountain.json", { cases, keys, detect, cased, wraps, documents, chapters, books });
 });
