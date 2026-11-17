@@ -1285,3 +1285,94 @@ it.skipIf(!OUT)("writes CSL normalization fixtures", async () => {
   const capped = normalizeCslItemsDetailed(many);
   write("csl.json", { cases, ids, capped: { count: capped.items.length, last: capped.items[capped.items.length - 1], warnings: capped.warnings } });
 });
+
+it.skipIf(!OUT)("writes open sync folder fixtures", async () => {
+  const { OpenFolderSyncProvider } = await import("$lib/storage/sync/open-provider");
+  const { readOpenProjects, normalizeDocument } = await import("$lib/storage/sync/open-layout");
+  const NOW = 1_763_500_000_000;
+  const now = vi.spyOn(Date, "now").mockReturnValue(NOW);
+  const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+  try {
+    const first = createStoredProject(richProject(), "device-a", 1_763_000_000_000);
+    const draft = createStoredProject(storyProject(), "device-a", 1_763_000_000_000);
+    const edited = { ...draft.project, documents: draft.project.documents.filter((d) => d.id !== "d2") };
+    const second = stampProject(draft, edited, "device-b", 1_763_000_100_000);
+    const projects = [first, second];
+
+    const fs = new MemoryFileSystem();
+    const provider = new OpenFolderSyncProvider(fs);
+    const connection = await provider.connect("");
+    const normalized = provider.normalize(projects);
+    await provider.push(normalized);
+    const files = await dump(fs);
+    const read = await readOpenProjects(fs, NOW);
+
+    const docPath = (project: string, id: string) => `projects/${safeName(project)}/documents/${safeName(id)}.md`;
+    const chapterPath = `projects/${safeName("project-1")}/chapters/chapter-1.json`;
+    const scenarios: Array<[string, (f: Record<string, string>) => void]> = [
+      ["bodyEdited", (f) => { f[docPath("project-1", "doc-1")] = f[docPath("project-1", "doc-1")].replace("It was", "It was *very*"); }],
+      ["titleEdited", (f) => { f[docPath("project-1", "doc-1")] = f[docPath("project-1", "doc-1")].replace('title: "Opening Scene"', 'title: "Renamed outside"'); }],
+      ["hashRemoved", (f) => { f[docPath("project-1", "doc-3")] = f[docPath("project-1", "doc-3")].replace(/^hash: .*\n/m, ""); }],
+      ["newFile", (f) => { f[`projects/${safeName("project-1")}/documents/new.md`] = "---\nid: \"x-new\"\ntitle: \"New\"\n# a comment line\nchapterId: \"chapter-1\"\ntrashed: true\nlabelId: \"label-1\"\nformat: \"poem\"\ncharacter: {\"role\":\"Cameo\"}\nunknown: 12.5\nflag: false\nnothing: null\nbare: plain words\n---\n\nHello [^n] and $x$.\r\n\r\n[^n]: A *new* note.\n\n\n"; }],
+      ["missingDocument", (f) => { delete f[docPath("project-1", "doc-2")]; }],
+      ["duplicateId", (f) => { f[`projects/${safeName("project-1")}/documents/copy.md`] = f[docPath("project-1", "doc-1")]; }],
+      ["invalidFrontmatter", (f) => { f[`projects/${safeName("project-1")}/documents/bad.md`] = "no frontmatter at all"; }],
+      ["invalidKey", (f) => { f[`projects/${safeName("project-1")}/documents/bad.md`] = "---\nid: \"z\"\nbad key: 1\n---\n"; }],
+      ["missingId", (f) => { f[`projects/${safeName("project-1")}/documents/bad.md`] = "---\ntitle: \"No id\"\n---\nbody"; }],
+      ["chapterEdited", (f) => { f[chapterPath] = f[chapterPath].replace('"Chapter One"', '"Chapter One, edited"'); }],
+      ["chapterCorrupt", (f) => { f[chapterPath] = "{ not json"; }],
+      ["rowsEdited", (f) => { const p = `projects/${safeName("project-1")}/storyboard/rows.json`; f[p] = f[p].replace('"Act I"', '"Act One"'); }],
+      ["projectEdited", (f) => { const p = `projects/${safeName("project-1")}/project.json`; f[p] = f[p].replace('"A. Writer"', '"Another Writer"'); }],
+      ["projectMissing", (f) => { delete f[`projects/${safeName("project-1")}/project.json`]; }]
+    ];
+    const outside = [];
+    for (const [name, mutate] of scenarios) {
+      const copy = { ...files };
+      mutate(copy);
+      const scenarioFs = new MemoryFileSystem();
+      for (const [path, content] of Object.entries(copy)) await scenarioFs.writeText(path, content);
+      try {
+        outside.push({ name, files: copy, projects: await readOpenProjects(scenarioFs, NOW) });
+      } catch (error) {
+        outside.push({ name, files: copy, error: (error as Error).message });
+      }
+    }
+
+    const refusals = [];
+    for (const [name, setup] of [
+      ["vault", { "vault.json": "{}" }],
+      ["bundle", { "prosecraft-sync.prosecraft": "{}" }],
+      ["encryptedProject", { "projects/p/project.enc": "x" }],
+      ["openProject", { "projects/p/project.json": "{}" }],
+      ["badMarker", { "prosecraft-folder.json": "{\"format\":\"other\"}" }],
+      ["unreadableMarker", { "prosecraft-folder.json": "not json" }]
+    ] as const) {
+      const refusalFs = new MemoryFileSystem();
+      for (const [path, content] of Object.entries(setup)) await refusalFs.writeText(path, content);
+      try {
+        await new OpenFolderSyncProvider(refusalFs).connect("");
+        refusals.push({ name, files: setup, error: null, after: await dump(refusalFs) });
+      } catch (error) {
+        refusals.push({ name, files: setup, error: (error as Error).message });
+      }
+    }
+
+    // A whole sync: an edit outside ProseCraft and one inside since the last sync.
+    const syncFiles = { ...files };
+    syncFiles[docPath("project-1", "doc-1")] = syncFiles[docPath("project-1", "doc-1")].replace("It was", "Outside, it was");
+    const syncFs = new MemoryFileSystem();
+    for (const [path, content] of Object.entries(syncFiles)) await syncFs.writeText(path, content);
+    const lastSynced = Object.fromEntries(normalized.map((p) => [p.id, { updatedAt: p.updatedAt, revision: p.revision }]));
+    const localEdit = stampProject(normalized[1], { ...normalized[1].project, name: "Second, renamed" }, "device-a", NOW - 10);
+    const result = await new OpenFolderSyncProvider(syncFs).sync("", [normalized[0], localEdit], lastSynced, NOW, "device-a");
+    const sync = { files: syncFiles, local: [normalized[0], localEdit], lastSynced, result, after: await dump(syncFs) };
+
+    const documents = [...richProject().documents, ...storyProject().documents, { id: "n", title: "", content: "<p>x</p>", format: "weird" }, { id: "e", title: "", content: "", markdownSource: "\r\nLine\r\n\r\n\n" }]
+      .map((document) => ({ document, normalized: normalizeDocument(document as never) }));
+
+    write("sync-open.json", { now: NOW, projects, connection, normalized, files, read, outside, refusals, sync, documents });
+  } finally {
+    now.mockRestore();
+    random.mockRestore();
+  }
+});
