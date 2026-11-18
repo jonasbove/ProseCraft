@@ -857,7 +857,11 @@ it.skipIf(!OUT)("writes Scrivener and RTF import fixtures", async () => {
     "{\\rtf1\\ansi one\\par\\par}", "{\\rtf1\\ansi a\\tab b\\~c\\_d\\-e\\par}", "{\\rtf1\\ansi \\{x\\}\\\\y < & \"\\par}", "{\\rtf1\\ansi {\\b bold} plain\\par}", "{\\rtf1\\ansi broken",
     "{\\rtf1\\ansi \\b bold", "{\\rtf1\\ansi a} extra\\par}", "\\rtf1 no groups", "{\\rtf1\\ansi\\ansicpg1252\\deff0 {\\fonttbl{\\f0 Arial;}}{\\colortbl;\\red0\\green0\\blue0;}{\\*\\generator x}{\\info{\\title T}}\\pard Visible{\\footnote note}\\par}",
     "{\\rtf1\\ansi\\ansicpg1251 \\'cf\\'f0\\'e8\\'e2\\'e5\\'f2\\par}", "{\\rtf1\\ansi\\ansicpg936 \\'d6\\'d0\\'ce\\'c4\\par}", "{\\rtf1\\ansi\\ansicpg932 \\'82\\'a0\\par}",
-    "{\\rtf1\\ansi\\ansicpg65001 \\'e2\\'82\\'ac\\par}", "{\\rtf1\\ansi\\ansicpg65001 \\'ef\\'bb\\'bfBOM\\par}", "{\\rtf1\\ansi\\ansicpg949 \\'c7\\'d1 \\par}", "{\\rtf1\\ansi\\ansicpg99999 \\'e4\\par}",
+    "{\\rtf1\\ansi\\ansicpg65001 \\'e2\\'82\\'ac\\par}", "{\\rtf1\\ansi\\ansicpg65001 \\'ef\\'bb\\'bfBOM\\par}", "{\\rtf1\\ansi\\ansicpg949 \\'c7\\'d1 \\par}",
+    // Code pages without a windows-N label, and \\uN text, bytes, tabs and symbols in order
+    // (jennraeross/ProseCraft#49).
+    "{\\rtf1\\ansi\\ansicpg950 \\'a4\\'a4\\'a4\\'e5\\par}", "{\\rtf1\\mac\\ansicpg10000 caf\\'8e\\par}", "{\\rtf1\\ansi\\ansicpg932 \\'93\\'fa\\'96\\'7b\\par}",
+    "{\\rtf1\\ansi\\ansicpg932\\uc0 \\u9731 \\'93\\'fa\\par}", "{\\rtf1\\ansi\\ansicpg1252 x\\'e9\\tab y\\'e9\\{\\'e9\\}\\'e9\\\\\\par}", "{\\rtf1\\ansi\\ansicpg99999 \\'e4\\par}",
     "{\\rtf1\\ansi \\b\\i x\\b0 y\\i0 z\\par}", "{\\rtf1\\ansi \\b x\\pard y\\plain z\\par}", "{\\rtf1\\ansi a\\'zz b\\'4\\par}", "{\\rtf1\\ansi \\uc1\\u8364\\'80 euro\\par}",
     "{\\rtf1\\ansi \\u65 \\u66\\u67 x\\par}", "{\\rtf1\\ansi {\\*\\ignored {\\b nested}} after\\par}", "{\\rtf1\\ansi {\\pict\\pngblip 89504e47} text\\par}", "{\\rtf1\\ansi \\b {\\i inner} \\par next\\par}", "{\\rtf1\\ansi\\ansicpg1251 \\'cf\\ansicpg- \\'cf\\par}", "{\\rtf1\\ansi \\ucx\\u228?? \\b- bold\\par}",
     new Uint8Array([...strToU8("{\\rtf1\\ansi\\ansicpg1252 raw "), 0xe4, 0xf6, ...strToU8("\\par}")]), new Uint8Array([...strToU8("{\\rtf1\\ansi\\ansicpg65001 raw "), 0xe2, 0x82, 0xac, ...strToU8("\\par}")])
@@ -1528,7 +1532,9 @@ it.skipIf(!OUT)("writes citation import and library fixtures", async () => {
     "@article{dup, title = {First}}\n@article{dup, title = {Second}}",
     "@online{o, author = {Online, O.}, title = {Online thing}, url = {https://o.example}, date = {2023-05-06}}",
     "no entries here",
-    "@book{acc, title = {\\'Ecole, na\\\"ive, {\\ss}, \\o, \\aa, \\c{c}, \\~n, ---, --, ``q''}, author = {{\\'E}mile Zola}}"
+    "@book{acc, title = {\\'Ecole, na\\\"ive, {\\ss}, \\o, \\aa, \\c{c}, \\~n, ---, --, ``q''}, author = {{\\'E}mile Zola}}",
+    // Words that are Object.prototype members (jennraeross/ProseCraft#47).
+    "@constructor{c1, title = {Odd type}, year = 2020}\n@article{c2, title = constructor # { and } # __proto__, year = 2020, month = constructor}\n@article{c3, title = {T}, year = 2021, month = __proto__}"
   ];
   const ris = [
     ...Object.values(own).filter((t) => /^\s*TY\s/m.test(t)),
@@ -1616,7 +1622,10 @@ it.skipIf(!OUT)("writes editor citation label fixtures", async () => {
     { id: "smith2020b", type: "book", title: "Another Lighthouse", author: [a("Smith", "Jo Ann")], issued: { "date-parts": [[2020]] } },
     { id: "doe-roe", type: "article-journal", title: "Tides", author: [a("Doe", "Jane"), a("Roe", "Richard")], issued: { "date-parts": [[2019]] }, "container-title": "Sea", page: "101-120" },
     { id: "corp", type: "report", title: "Annual report", author: [{ literal: "World Lighthouse Organization" }], issued: { "date-parts": [[2022]] } },
-    { id: "nodate", type: "book", title: "Undated", author: [a("Nobody", "N.")] }
+    { id: "nodate", type: "book", title: "Undated", author: [a("Nobody", "N.")] },
+    // Ids that are Object.prototype members (jennraeross/ProseCraft#47).
+    { id: "constructor", type: "book", title: "Built", author: [a("Builder", "B.")], issued: { "date-parts": [[2018]] } },
+    { id: "toString", type: "book", title: "Strung", author: [a("Stringer", "S.")], issued: { "date-parts": [[2017]] } }
   ]);
   const marker = (cites: unknown) => `<span class="cite-ref" data-cites="${JSON.stringify(cites).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" contenteditable="false"></span>`;
   const markers = [
@@ -1627,7 +1636,9 @@ it.skipIf(!OUT)("writes editor citation label fixtures", async () => {
     citeMarkerHtml([{ id: "nodate", suppressAuthor: true }, { id: "gone" }]),
     citeMarkerHtml([{ id: "doe-roe", locator: "7-9", label: "section" }]),
     marker("not an array"),
-    marker([{ id: "smith2020" }, { id: "smith2020" }])
+    marker([{ id: "smith2020" }, { id: "smith2020" }]),
+    citeMarkerHtml([{ id: "constructor" }]),
+    citeMarkerHtml([{ id: "toString" }, { id: "__proto__" }])
   ];
   const html = `<p>A ${markers.slice(0, 4).join(" b ")}.</p><p>${markers.slice(4).join(" and ")}</p>`;
   const cases = [];
