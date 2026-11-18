@@ -1957,3 +1957,38 @@ it.skipIf(!OUT)("writes generated cover fixtures", async () => {
   toDataURL.mockRestore();
   write("cover-art.json", { cases });
 }, 60_000);
+
+it.skipIf(!OUT)("writes research fixtures", async () => {
+  const research = await import("$lib/research");
+  const urls = ["", "  ", "example.com", "https://www.Example.com/a b?q=1#x", "http://ex.org", "ftp://x.org", "mailto:a@b.c", "javascript:alert(1)",
+    "www.wiki.org/Page", "HTTPS://WWW.EXAMPLE.COM", "localhost:3000/x", "https://user:pw@host.io:8443/p", "not a url", "https://bücher.de/ä", "//proto.rel", "https://"];
+  const names = ["report.pdf", "  notes .txt ..", "a/b\\c:d*e?f\"g<h>i|j.md", "CON", "con.txt", "com1.doc", "COM0", "lpt9", ".", "..", "", "ﬁle№１.TXT",
+    "x".repeat(200) + ".markdown", "y".repeat(300), "z".repeat(170) + ".verylongextensionhere", "tab\there\nnew.txt", "émoji 😀 file.png"];
+  const paths = ["/home/a/Report Final.PDF", "C:\\Users\\b\\notes.md", "dir/", "file"];
+  const sizes = [-1, 0, 1, 1023, 1024, 1536, 1048575, 1048576, 1310720, 1572864, 10485759, 10485760, 15728640, 209715200, Number.NaN, Infinity];
+  const folders = [["My Novel", "abc-123-XYZ-9999"], ["", ""], ["  ..Hidden: name?  ", "!!"], ["A".repeat(70), "id"], ["trail. . ", "x"]];
+  const folderValues: unknown[] = ["  My/Folder  ", "con", "CON.txt", "..", ".", "...a", 5, null, "a".repeat(100) + " .", "lpt3"];
+  const keys = ["research/abc-1/file.txt", "research/abc/../x", "research//x", "research/a b/x", "research/a/b/c", "other/a/x", "research/a/.", "research/a/..", "research/a/x\\y"];
+  const items = [
+    { id: "f1", kind: "file", folderId: "f", title: "  Report  ", fileName: "report.pdf", mimeType: "application/pdf", size: 1234, storageKey: "research/f1/report.pdf", addedAt: 5 },
+    { id: "f2", kind: "file", folderId: "gone", title: "", fileName: "a.md", mimeType: "", size: 0, storageKey: "research/f2/a.md" },
+    { id: "f3", kind: "file", fileName: "b.md", mimeType: "text/markdown", size: -1, storageKey: "research/f3/b.md" },
+    { id: "f4", kind: "file", fileName: "c.md", mimeType: "text/markdown", size: 3, storageKey: "../etc/passwd" },
+    { id: "l1", kind: "link", url: "example.org/x", description: "d".repeat(2100) },
+    { id: "l1", kind: "link", url: "https://dup.org" },
+    { id: "l2", kind: "link", url: "ftp://nope" },
+    { id: "l3", kind: "link", title: "Named", url: "https://named.org", folderId: "f", addedAt: "7" },
+    { id: "", kind: "link", url: "https://x.org" },
+    { id: "n", kind: "note" }, "str", null
+  ];
+  write("research.json", {
+    urls: urls.map((u) => ({ raw: u, normalized: research.normalizeResearchUrl(u), title: research.researchTitleFromUrl(u) })),
+    names: names.map((n) => ({ raw: n, safe: research.safeResearchFileName(n), mime: research.researchMimeType(n) })),
+    paths: paths.map((p) => ({ raw: p, name: research.researchFileNameFromPath(p) })),
+    sizes: sizes.map((b) => ({ bytes: Number.isFinite(b) ? b : String(b), text: research.formatResearchFileSize(b) })),
+    folders: folders.map(([name, id]) => ({ name, id, folder: research.createResearchFolderName(name, id) })),
+    folderValues: folderValues.map((v) => ({ value: v, normalized: research.normalizeResearchFolderName(v) })),
+    keys: keys.map((k) => ({ key: k, items: research.normalizeResearchItems([{ id: "k", kind: "file", fileName: "x", mimeType: "x", size: 1, storageKey: k }], new Set()).length })),
+    items: { raw: items, normalized: research.normalizeResearchItems(items, new Set(["f"])) }
+  });
+});
