@@ -1780,3 +1780,49 @@ it.skipIf(!OUT)("writes Zotero fixtures", async () => {
     paths, http, errors, keys, mapped, invalid, providers
   });
 });
+
+it.skipIf(!OUT)("writes custom style fixtures", async () => {
+  const presets = await import("$lib/publish/presets");
+  const raw = [
+    { id: "custom-a", label: "  Courier draft  ", fontId: "courier", bodySizePt: 12, lineHeight: 2, trimId: "letter", marginTopIn: 1, marginRightIn: 1, marginBottomIn: 1, marginLeftIn: 1, chapterHeadingAlign: "center", chapterHeadingUppercase: true, dropCap: true, justify: true, runningHeader: true, pageNumbers: true },
+    { id: "custom-b", label: "Sans A5", fontId: "ibm-plex-sans", bodySizePt: "10.5", lineHeight: 9, paragraphIndentEm: -2, trimId: "a5", marginTopIn: "0.6", sceneBreakSpacing: 2.25, pageNumbers: false },
+    { id: "custom-c", label: "Clamped", fontId: "comic-sans", bodySizePt: "", lineHeight: Number.NaN, chapterHeadingAlign: "right", trimId: "folio", marginLeftIn: 99, justify: "yes" },
+    { id: "custom-a", label: "Duplicate id" },
+    { id: "classic", label: "Built-in id" },
+    { id: "custom-d", label: "   " },
+    { id: "", label: "No id" },
+    "not an object",
+    { id: "x".repeat(101), label: "Long id" },
+    { id: "custom-e", label: "A label that goes on and on, much longer than sixty characters allow" }
+  ];
+  const normalized = presets.normalizeCustomStyles(raw);
+  const tokens = normalized.map((style) => presets.customStyleTokens(style));
+  let seed = 0;
+  const realUuid = crypto.randomUUID;
+  (crypto as { randomUUID: () => string }).randomUUID = () => `uuid-${++seed}`;
+  const created = [...presets.PRESET_ORDER, "custom-a", "missing"].map((source) => ({
+    source,
+    style: presets.createCustomStyle(source, normalized)
+  }));
+  (crypto as { randomUUID: () => string }).randomUUID = realUuid;
+  const project = bookProject();
+  const html: Record<string, string> = {};
+  for (const style of ["custom-a", "custom-b"]) {
+    const options = normalizePublishOptions({ style, customStyles: raw, dropCaps: true, includeTableOfContents: true });
+    const live = project.chapters.filter((c) => !c.trashed);
+    const book = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    html[style] = await exportHtml(book, options).blob.text();
+  }
+  write("custom-styles.json", {
+    raw: raw.map((r) => (typeof r === "object" && r && Number.isNaN((r as { lineHeight?: number }).lineHeight) ? { ...r, lineHeight: "NaN" } : r)),
+    normalized,
+    tokens,
+    created,
+    project,
+    html
+  });
+});
