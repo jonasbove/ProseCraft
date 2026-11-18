@@ -1992,3 +1992,26 @@ it.skipIf(!OUT)("writes research fixtures", async () => {
     items: { raw: items, normalized: research.normalizeResearchItems(items, new Set(["f"])) }
   });
 });
+
+it.skipIf(!OUT)("writes proofreading fixtures", async () => {
+  const { ensureHarperLinter, lintPlainText, resetHarperLinter } = await import("$lib/proofread/harper");
+  const texts = [
+    "",
+    "This is an test of the the proofreader. Their going to the store tomorow.",
+    "The colour of the organisation's centre was grey. I realize the color is gray.",
+    "She dont know what to do,and he said that it were fine . Its a nice day isnt it",
+    "Hello world.\nA new paragraph starts here without a space.Another sentence follows.",
+    "Mr. Smith arrived at 5 p.m. on Tuesday , and we had alot of fun.",
+    "The lighthouse keeper climbed the stairs. Every night, the light turned slowly over the water."
+  ];
+  const out: Record<string, unknown> = {};
+  for (const dialect of ["american", "british", "australian", "canadian"] as const) {
+    resetHarperLinter();
+    const linter = await ensureHarperLinter(dialect);
+    out[dialect] = [];
+    for (const text of texts) {
+      (out[dialect] as unknown[]).push({ text, lints: await lintPlainText(linter, text) });
+    }
+  }
+  write("proofread.json", out);
+}, 300_000);
