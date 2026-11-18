@@ -1656,3 +1656,127 @@ it.skipIf(!OUT)("writes editor citation label fixtures", async () => {
   cases.push({ style: "apa7", locale: "en", empty: true, labels: Array.from(emptyRoot.querySelectorAll("span.cite-ref")).map((e) => e.getAttribute("data-label")) });
   write("citation-labels.json", { library, markers, cases });
 });
+
+it.skipIf(!OUT)("writes Zotero fixtures", async () => {
+  const z = await import("$lib/citations/zotero");
+  const queries = ["", "  habermas  ", "Müller & Söhne", "a/b?c=d#e f+g", "😀  x", "100% (draft)!*'~"];
+  const limits = [undefined, 0, 5, 25, 100, 101, 2.5, -1, Number.NaN];
+  const paths = queries.flatMap((query) => limits.map((limit) => ({ query, limit: limit === undefined ? null : Number.isNaN(limit) ? "NaN" : limit, path: z.buildZoteroSearchPath(query, limit) })));
+  const http = [403, 408, 504, 500, 404, 200].flatMap((status) => ["", "  Local API is not enabled \n"].map((body) => ({ status, body, state: z.classifyZoteroHttpError(status, body) })));
+  const errors = [
+    "Zotero is not running (connection refused on 127.0.0.1:23119).",
+    "Zotero request timed out after 5s.",
+    "Could not reach Zotero: Network is unreachable (os error 101)",
+    "Could not reach Zotero: Connection refused (os error 111)",
+    "HTTP 403: Local API is not enabled",
+    "HTTP 403",
+    "HTTP 500",
+    "http 404 : Not found\nline two",
+    "HTTP 5000",
+    "Zotero integration is only available in the desktop app.",
+    "Local API is not enabled",
+    "allow other applications on this computer to communicate with Zotero",
+    "error 403 Forbidden",
+    "403forbidden",
+    "WouldBlock",
+    "operation TIMED OUT",
+    "time out",
+    "ETIMEDOUT",
+    "ECONNREFUSED",
+    "No connection could be made because the target machine actively refused it. (os error 10061)",
+    "connect failed",
+    "Zotero response exceeded 5 MB limit.",
+    "Zotero returned an incomplete HTTP response.",
+    "",
+    "   ",
+    "  something odd  "
+  ].map((raw) => ({ raw, state: z.classifyZoteroError(raw) }));
+  errors.push({ raw: "(ZoteroError invalid-response)", state: z.classifyZoteroError(new z.ZoteroError("invalid-response", "Zotero returned an invalid JSON response.", "bad")) });
+  const keys = [
+    ["http://zotero.org/users/local/0/items/K8M9P2Q1", undefined],
+    ["http://zotero.org/users/0/items/AB12CD34?format=csljson", undefined],
+    ["http://zotero.org/users/0/ITEMS/ab12cd34#x", undefined],
+    ["http://zotero.org/users/0/items/123", "EXPLICIT9"],
+    ["http://zotero.org/users/0/items/123", "   "],
+    ["http://zotero.org/users/0/items/123", "!!!"],
+    ["smith2020", undefined],
+    ["  spaced key  ", undefined],
+    ["https://example.com/no/items/here", undefined],
+    ["https://example.com/items/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456", undefined],
+    ["", undefined],
+    [42, undefined],
+    [-3.5, undefined],
+    [Number.POSITIVE_INFINITY, undefined],
+    [null, "K1"],
+    [undefined, undefined],
+    [true, undefined],
+    ["Ünïcödé key", undefined]
+  ].map(([id, key]) => ({ id: id === undefined ? "(undefined)" : id === Number.POSITIVE_INFINITY ? "(Infinity)" : id, key: key === undefined ? "(undefined)" : key, out: z.extractZoteroKey(id, key) ?? null }));
+  const typeEntries = ["journalArticle", "BOOK", "bookSection", "conferencePaper", "blogPost", "computerProgram", "preprint", "videoRecording", "podcast", "constructor", "toString", "__proto__", "hasOwnProperty", "somethingElse", "  thesis  ", ""]
+    .map((itemType, i) => ({ id: `t${i}`, itemType, title: `Type ${itemType}` }));
+  const texts = [
+    JSON.stringify([
+      { id: "http://zotero.org/users/local/0/items/K8M9P2Q1", type: "book", title: "Strukturwandel der Öffentlichkeit", author: [{ family: "Habermas", given: "Jürgen" }], issued: { "date-parts": [[1962]] }, publisher: "Luchterhand", "publisher-place": "Neuwied", ISBN: "978-3-518-28491-9" },
+      { id: "http://zotero.org/users/local/0/items/R4T7W1X9", type: "article-journal", "citation-key": "rosa2016resonanz", title: "Resonanz als Grundbegriff", author: [{ family: "Rosa", given: "Hartmut" }], "container-title": "Soziologische Revue", volume: "39", issue: "4", page: "501-515", issued: { "date-parts": [[2016]] }, DOI: "10.1515/srsr-2016-0068" },
+      { id: "http://zotero.org/users/local/0/items/ATT00001", itemType: "attachment", title: "Full Text PDF" }
+    ]),
+    JSON.stringify([{ id: 42, citationKey: "arendt1958", citekey: "arendt1958", item: { id: "http://zotero.org/users/0/items/Z9Y8X7W6", type: "book", title: "The Human Condition", author: [{ family: "Arendt", given: "Hannah" }], issued: { "date-parts": [[1958]] }, publisher: "University of Chicago Press" } }]),
+    JSON.stringify({ items: [{ id: "A1B2", itemType: "note", title: "n" }, { id: "C3D4", itemType: "Annotation" }, { key: "E5F6G7", title: "Keyed only" }, { citeKey: "onlyKey", title: "Cite key only", url: "https://e.x/a", doi: "10.1/x", isbn: "123" }, { URL: "https://kept", url: "https://dropped", title: "Both URLs" }] }),
+    JSON.stringify({ id: "SINGLE01", type: "report", title: "One object" }),
+    JSON.stringify(typeEntries),
+    JSON.stringify([{ title: "No id or type", author: [{ family: "X" }] }, { id: "nothing" }, { id: "dup", type: "book", title: "First" }, { id: "dup", type: "book", title: "Second" }, "a string", 7, null, [1]]),
+    JSON.stringify([{ item: "not an object", citationKey: "wrapped" }, { item: { title: "Inner without id" }, citeKey: "outerKey", id: "http://zotero.org/users/0/items/OUTER123" }]),
+    "﻿  " + JSON.stringify([{ id: "BOM00001", type: "book", title: "After a BOM" }]) + "\n",
+    "",
+    "   \n",
+    "null",
+    "42",
+    "[]",
+    "{}",
+    "\"text\"",
+    JSON.stringify({ items: "nope" })
+  ];
+  const mapped = texts.map((text) => ({ text, items: z.mapZoteroCslJson(text) }));
+  const invalid = ["{not json", "[1,", "﻿{", "nul"].map((text) => {
+    try {
+      z.mapZoteroCslJson(text);
+      return { text, error: null };
+    } catch (error) {
+      const e = error as InstanceType<typeof z.ZoteroError>;
+      return { text, error: { code: e.code, message: e.message } };
+    }
+  });
+  // The provider, through a transport that answers from a table.
+  const run = async (answers: Record<string, string | Error>) => {
+    const calls: string[] = [];
+    const local = new z.ZoteroLocal(async (path: string) => {
+      calls.push(path);
+      const answer = answers[path] ?? answers["*"];
+      if (answer instanceof Error) throw answer;
+      if (answer === undefined) throw new Error("HTTP 404");
+      return answer;
+    });
+    const status = await local.checkStatus();
+    let search: unknown;
+    try {
+      search = { items: await local.search("  rosa ") };
+    } catch (error) {
+      const e = error as InstanceType<typeof z.ZoteroError>;
+      search = { error: { code: e.code, message: e.message, detail: e.detail ?? null } };
+    }
+    const pick = await local.tryPick();
+    return { calls, status: { available: status.available, error: status.error ?? null }, search, pick };
+  };
+  const searchPath = z.buildZoteroSearchPath("  rosa ");
+  const providers = await Promise.all([
+    run({ [z.ZOTERO_PING_PATH]: "Zotero is running", [searchPath]: texts[0], [z.ZOTERO_BBT_CAYW_PATH]: texts[1] }),
+    run({ [z.ZOTERO_PING_PATH]: "ok", [searchPath]: "{broken", [z.ZOTERO_BBT_CAYW_PATH]: "  " }),
+    run({ "*": new Error("Zotero is not running (connection refused on 127.0.0.1:23119).") }),
+    run({ [z.ZOTERO_PING_PATH]: new Error("HTTP 403: Local API is not enabled"), [searchPath]: new Error("HTTP 403: Local API is not enabled") }),
+    run({ [z.ZOTERO_PING_PATH]: "ok", [searchPath]: new Error("Zotero request timed out after 5s."), [z.ZOTERO_BBT_CAYW_PATH]: new Error("HTTP 404") })
+  ]);
+  write("zotero.json", {
+    constants: { ping: z.ZOTERO_PING_PATH, cayw: z.ZOTERO_BBT_CAYW_PATH, limit: z.ZOTERO_SEARCH_LIMIT },
+    paths, http, errors, keys, mapped, invalid, providers
+  });
+});
