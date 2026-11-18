@@ -1552,7 +1552,13 @@ it.skipIf(!OUT)("writes citation import and library fixtures", async () => {
     ...json.map((text, i) => ({ text, filename: i % 2 === 0 ? "refs.json" : "" })),
     { text: "   \n", filename: "empty.bib" },
     { text: "plain words", filename: "" },
-    { text: "@article{q, title={T}}", filename: "refs.CSL" }
+    { text: "@article{q, title={T}}", filename: "refs.CSL" },
+    // Found by the differential corpus (src/citation-compare.gen.test.ts): `/^[a-z0-9_.-]+$/i`
+    // rejects the long s and accepts the Kelvin sign (lower-cased to "k"), a JSON escape of a
+    // character past U+00FF, and lone surrogates written as JSON escapes.
+    { text: "@string{\u017f = {x}}\n@book{k, \u017f = {y}, \u212aey = {z}, title = \u017f}", filename: "refs.bib" },
+    { text: "[\"\\\u0130\"]", filename: "refs.json" },
+    { text: "[{\"type\":\"book\",\"title\":\"cut \\ud83d\"},{\"type\":\"book\",\"title\":\"\\ude00 x\",\"container-title\":\"a\\ud83d\\ude00\"}]", filename: "refs.json" }
   ].map((c) => ({ ...c, result: importCitations(c.text, c.filename) }));
   const bibtex = bib.map((text) => ({ text, result: parseBibtex(text) }));
   const risParsed = ris.map((text) => ({ text, result: parseRis(text) }));
