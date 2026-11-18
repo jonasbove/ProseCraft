@@ -1892,3 +1892,68 @@ it.skipIf(!OUT)("writes cover fixtures", async () => {
   vi.unstubAllGlobals();
   write("cover.json", { png, rawCovers: rawCovers.map((c) => (c === undefined ? "UNDEFINED" : c)), normalized, project, exports });
 }, 30_000);
+
+it.skipIf(!OUT)("writes generated cover fixtures", async () => {
+  const { resolveCoverImage } = await import("$lib/publish/cover");
+  const { resolveStyleTokens } = await import("$lib/publish/presets");
+  // A canvas that records what is drawn. Text is measured as 0.5 (0.6 from weight 700) of the
+  // font size per character, so the layout can be replayed exactly.
+  const measure = (text: string, font: string) => {
+    const size = Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 10);
+    const weight = Number(/ (\d{3}) /.exec(font)?.[1] ?? 400);
+    return Array.from(text).length * size * (weight >= 700 ? 0.6 : 0.5);
+  };
+  let calls: unknown[] = [];
+  const paint = (value: unknown) =>
+    typeof value === "object" && value ? { gradient: (value as { args: number[] }).args, stops: (value as { stops: unknown[] }).stops } : value;
+  const recorder = () => {
+    let path: unknown[] = [];
+    const state = { fillStyle: "#000000" as unknown, strokeStyle: "#000000" as unknown, lineWidth: 1, font: "10px sans-serif", textAlign: "start", textBaseline: "alphabetic" };
+    return Object.assign(state, {
+      createLinearGradient: (...args: number[]) => {
+        const g = { args, stops: [] as unknown[], addColorStop(offset: number, color: string) { this.stops.push([offset, color]); } };
+        return g;
+      },
+      fillRect: (...args: number[]) => calls.push({ op: "fillRect", args, fill: paint(state.fillStyle) }),
+      strokeRect: (...args: number[]) => calls.push({ op: "strokeRect", args, stroke: state.strokeStyle, lineWidth: state.lineWidth }),
+      beginPath: () => { path = []; },
+      moveTo: (...args: number[]) => path.push(["M", ...args]),
+      lineTo: (...args: number[]) => path.push(["L", ...args]),
+      arc: (...args: number[]) => path.push(["A", ...args]),
+      stroke: () => calls.push({ op: "stroke", path, stroke: state.strokeStyle, lineWidth: state.lineWidth }),
+      fill: () => calls.push({ op: "fill", path, fill: paint(state.fillStyle) }),
+      fillText: (text: string, x: number, y: number) =>
+        calls.push({ op: "fillText", text, x, y, font: state.font, align: state.textAlign, baseline: state.textBaseline, fill: paint(state.fillStyle) }),
+      measureText: (text: string) => ({ width: measure(text, state.font) })
+    });
+  };
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation((() => recorder()) as never);
+  const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(() => "data:image/png;base64,AAAA");
+  const books = [
+    { title: "The Lighthouse Keeper", subtitle: "A Novel", author: "A. Writer" },
+    { title: "Every Word of a Very Long Title That Keeps Going Well Past What One Line Holds On Any Cover", subtitle: "", author: "" },
+    { title: "Two\nLines", subtitle: "A subtitle long enough that it has to wrap onto another line here", author: "Maximiliana Wolkenstein-Abernathy-Featherstonehaugh of the Long Name" },
+    { title: "   ", subtitle: "Only a subtitle", author: "Ann Lee" }
+  ];
+  const cases: unknown[] = [];
+  const designs = ["classic", "modern", "minimal", "bold"];
+  const palettes = ["ink", "sage", "clay", "ocean", "plum"];
+  let n = 0;
+  for (const design of designs) {
+    for (const [b, book] of books.entries()) {
+      const palette = palettes[n++ % palettes.length];
+      const style = b % 2 ? "custom-mono" : "classic";
+      const options = normalizePublishOptions({
+        style,
+        customStyles: [{ id: "custom-mono", label: "Mono", fontId: "courier" }],
+        cover: { mode: "generated", design, palette }
+      });
+      calls = [];
+      const cover = await resolveCoverImage({ ...book, chapters: [] } as never, options);
+      cases.push({ book, design, palette, styleFont: resolveStyleTokens(options.style, options.customStyles).cssFontFamily, calls, cover });
+    }
+  }
+  getContext.mockRestore();
+  toDataURL.mockRestore();
+  write("cover-art.json", { cases });
+}, 60_000);
