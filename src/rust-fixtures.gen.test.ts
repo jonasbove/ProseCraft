@@ -2015,3 +2015,43 @@ it.skipIf(!OUT)("writes proofreading fixtures", async () => {
   }
   write("proofread.json", out);
 }, 300_000);
+
+it.skipIf(!OUT)("writes calculation fixtures", async () => {
+  const calc = await import("$lib/rich/calc");
+  const sheets = [
+    "",
+    "   \n  ",
+    "# Beam\nm := 5 kg\na := 9.81 m/s^2\nF := m a =\nF = kN\nF = kg\nf(x) := x^2 + 1\nf(3) =\nf(2, 3) =",
+    "x := 2.0625\nx =\ny := 1.0005\ny =\nz := 0.0625\nz =\nw := 1.25e9\nw =\nv := 0.00012345\nv =\nu := -0.5\nu =\nt := 999999.9995\nt =\nq := 0.99995\nq =",
+    "v := 60 mph\nv = kph\nv = m/s\nd := 3 hr v\nd = mi\nd = km\nE := 1 kWh\nE = J\nE = cal",
+    "θ := 30°\nsin(θ) =\ncos(30 deg) =\ntan(pi/4) =\nasin(0.5) = deg\natan(1) = °\nln(e) =\nlog(1000) =\nexp(1) =",
+    "a := 5 m\nb := 3 s\na + b =\na / 0 =\nsqrt(a b) =\nabs(-a) =\nfloor(2.5 m) =\nround(2.5) =\nround(-2.5) =\nmin(1 m, 2 m) =\nmax(1, 2, 3) =\nmin() =\nsqrt(1, 2) =",
+    "m := 2 kg\nv := 3 m/s\nKE := 0.5 m v^2 =\nKE = J\nx := 5 m\nm := 3\n5 m =\n9.81 m/s^2 =",
+    "f(x) := f(x)\nf(1) =\ng(x, y) := x y\ng(2, 3 m) =\nh := 2\nh(3) =\nh (4)^2 =\nnope(2) =\nsin =",
+    "1 +\n(2 =\n2 = = 3\nx := 1 =\n3 $ 4\nf(x) := x =\n1x := 2\nf(1x) := 2\nα := 2\nβ_0 := α^2 =\nΩ_load := 5 kΩ\nΩ_load = ohm\nμ := 3 μm\nμ = um",
+    "p := 1 atm\np = psi\np = bar\nP := 2 hp\nP = kW\nI := 2 mA\nR := 5 kΩ\nU := I R =\nU = V\nQ := 1 coul\nQ = A s",
+    "x := 1e400\nx =\ny := 1e-400\ny =\nz := 2^0.5 =\nn := -8\nn^(1/3) =\n10^-3 =\n2^3^2 =\n-2^2 =\n(-2)^2 =",
+    "a := 3·4 =\nb := 6×7 =\nc := 9−4 =\nlength := 2 ft + 3 in =\nlength = cm\nT := 300 K\nT = K\nn := 2 mol\nlum := 1 cd\nk := 1 \nk =",
+    Array.from({ length: 205 }, (_, i) => `x${i} := ${i}`).join("\n"),
+    "# Title with {braces} $ and % and _ and ^ and ~ and \\ back\nbad $ line\n\n\n\nx := 1\n\n",
+    "x := " + "1+".repeat(4100) + "1"
+  ];
+  const cases = sheets.map((source) => {
+    let lines: unknown = null;
+    let error: string | null = null;
+    let latex: string | null = null;
+    try {
+      const sheet = calc.evaluateWorksheet(source);
+      lines = sheet.lines;
+      try {
+        latex = calc.worksheetToLatex(sheet);
+      } catch (e) {
+        latex = `ERROR: ${(e as Error).message}`;
+      }
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    return { source, lines, error, latex, plain: calc.worksheetToPlainText(source) };
+  });
+  write("calc.json", { cases });
+});
