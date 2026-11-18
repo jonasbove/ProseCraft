@@ -466,6 +466,103 @@ function cslFilename(r: Rng): string {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Realistic exports: what reference managers write (standard types and fields, keys without
+// spaces, macros defined before use, common LaTeX). The fair baseline for other parsers.
+
+const REAL_WORDS = ["The", "lighthouse", "keeper", "a", "study", "of", "light", "and", "sea", "history", "theory", "data", "methods", "coastal", "navigation", "in", "early", "modern", "Europe", "on", "tides", "maritime", "trade", "{DNA}", "{Bayesian}", "networks", "analysis", "of", "{N}orway"];
+const REAL_LATEX = ["{\\\"u}", "\\'e", "{\\'e}", "\\`a", "{\\ss}", "\\&", "{\\o}", "\\v{c}", "\\c{c}", "--", "~", "\\textendash{}", "{\\aa}"];
+const REAL_NAMES = ["Doe, Jane", "Smith, John A.", "van der Berg, Anna", "M{\\\"u}ller, J{\\\"u}rgen", "Garc{\\'i}a M{\\'a}rquez, Gabriel", "{World Health Organization}", "Tolkien, J. R. R.", "de la Cruz, Maria", "King, Jr., Martin Luther", "Jane Roe", "Nakamura, Hiroshi", "O'Brien, Pat", "Dvo{\\v{r}}{\\'a}k, Anton{\\'i}n"];
+const REAL_RIS_NAMES = ["Doe, Jane", "Smith, John A.", "van der Berg, Anna", "Müller, Jürgen", "García Márquez, Gabriel", "World Health Organization", "Tolkien, J. R. R.", "King, Martin Luther, Jr.", "Nakamura, Hiroshi", "O'Brien, Pat", "Dvořák, Antonín", "Jane Roe"];
+const REAL_TYPES = ["article", "book", "incollection", "inproceedings", "phdthesis", "mastersthesis", "techreport", "misc", "online", "inbook", "proceedings", "unpublished", "manual", "report", "thesis"];
+
+function realTitle(r: Rng): string {
+  const words = r.some(REAL_WORDS, 2, 9);
+  if (r.chance(0.3)) words.splice(r.int(0, words.length), 0, r.pick(REAL_LATEX));
+  return words.join(" ");
+}
+
+function realBibEntry(r: Rng, macros: string[]): string {
+  const type = r.pick(REAL_TYPES);
+  const key = `${r.pick(["doe", "smith", "berg", "mueller", "garcia", "who", "tolkien", "roe"])}${r.int(1950, 2025)}${r.pick(["", "", "a", "b", "_x", ":1"])}`;
+  const quoted = r.chance(0.2);
+  const v = (text: string) => (quoted && !text.includes("\"") ? `"${text}"` : `{${text}}`);
+  const fields: string[] = [];
+  fields.push(`author = ${v(r.some(REAL_NAMES, 1, 4).join(" and ") + (r.chance(0.05) ? " and others" : ""))}`);
+  if (r.chance(0.15)) fields.push(`editor = ${v(r.some(REAL_NAMES, 1, 3).join(" and "))}`);
+  fields.push(`title = ${r.chance(0.5) ? `{${realTitle(r)}}` : v(realTitle(r))}`);
+  if (type === "article") fields.push(r.chance(0.3) && macros.length ? `journal = ${r.pick(macros)}` : `journal = ${v(realTitle(r))}`);
+  if (["incollection", "inproceedings", "inbook"].includes(type)) fields.push(`booktitle = ${v(realTitle(r))}`);
+  if (r.chance(0.7)) fields.push(`publisher = ${v(r.pick(["Oxford University Press", "Springer", "Harbour {\\&} Sons", "MIT Press"]))}`);
+  if (r.chance(0.4)) fields.push(`address = ${v(r.pick(["Oslo", "New York", "M{\\\"u}nchen", "London"]))}`);
+  if (type.endsWith("thesis")) fields.push(`school = ${v("University of Bergen")}`);
+  if (r.chance(0.85)) fields.push(`year = ${r.chance(0.5) ? r.int(1900, 2025) : v(String(r.int(1900, 2025)))}`);
+  if (r.chance(0.3)) fields.push(`month = ${r.chance(0.6) ? r.pick(MONTHS_BARE) : v(r.pick(["May", "jun", "12", "October"]))}`);
+  if (r.chance(0.2)) fields.push(`date = ${v(`${r.int(1990, 2025)}-${String(r.int(1, 12)).padStart(2, "0")}-${String(r.int(1, 28)).padStart(2, "0")}`)}`);
+  if (r.chance(0.5)) fields.push(`pages = ${v(`${r.int(1, 200)}--${r.int(201, 400)}`)}`);
+  if (r.chance(0.5)) fields.push(`volume = ${v(String(r.int(1, 99)))}`);
+  if (r.chance(0.4)) fields.push(`number = ${v(String(r.int(1, 12)))}`);
+  if (r.chance(0.4)) fields.push(`doi = ${v(`10.${r.int(1000, 9999)}/${r.pick(["abc", "j.x", "s123"])}.${r.int(1, 999)}`)}`);
+  if (r.chance(0.3)) fields.push(`url = ${v(`https://example.org/${r.pick(["a", "paper", "x_y"])}/${r.int(1, 99)}`)}`);
+  if (r.chance(0.2)) fields.push(`isbn = ${v("978-3-16-148410-0")}`);
+  if (r.chance(0.1)) fields.push(`edition = ${v(r.pick(["2", "Second", "3rd"]))}`);
+  if (r.chance(0.15)) fields.push(`language = ${v(r.pick(["english", "german", "en"]))}`);
+  if (r.chance(0.15)) fields.push(`abstract = ${v(Array.from({ length: r.int(1, 3) }, () => realTitle(r)).join(". "))}`);
+  if (r.chance(0.2)) fields.push(`keywords = ${v("sea, light")}`);
+  if (r.chance(0.1)) fields.push(`file = ${v(":files/1/x.pdf:application/pdf")}`);
+  const indent = r.pick(["  ", "\t", "    "]);
+  return `@${r.chance(0.1) ? type.toUpperCase() : type}{${key},\n${fields.map((f) => indent + f).join(",\n")}${r.chance(0.5) ? "," : ""}\n}`;
+}
+
+const MONTHS_BARE = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+function realBibDocument(r: Rng): string {
+  const blocks: string[] = [];
+  const macros: string[] = [];
+  if (r.chance(0.2)) {
+    for (const [name, value] of [["jnl", "Journal of Coastal Studies"], ["procs", "Proceedings of the Light Society"]]) {
+      blocks.push(`@string{${name} = {${value}}}`);
+      macros.push(name);
+    }
+  }
+  if (r.chance(0.05)) blocks.push("@comment{jabref-meta: databaseType:bibtex;}");
+  const n = r.int(1, 5);
+  for (let i = 0; i < n; i += 1) blocks.push(realBibEntry(r, macros));
+  return blocks.join("\n\n") + "\n";
+}
+
+function realRisRecord(r: Rng): string {
+  const type = r.pick(["JOUR", "BOOK", "CHAP", "CONF", "THES", "RPRT", "ELEC", "GEN", "EDBOOK", "MGZN", "NEWS", "DATA"]);
+  const lines = [`TY  - ${type}`];
+  for (const name of r.some(REAL_RIS_NAMES, 1, 4)) lines.push(`${r.pick(["AU", "AU", "A1"])}  - ${name}`);
+  if (r.chance(0.15)) lines.push(`A2  - ${r.pick(["Editor, Ed", "Roe, Jane"])}`);
+  lines.push(`${r.pick(["TI", "T1"])}  - ${realTitle(r).replace(/[{}\\]/g, "")}`);
+  if (type === "JOUR") lines.push(`${r.pick(["JO", "JF", "T2"])}  - Journal of Coastal Studies`);
+  if (type === "CHAP" || type === "CONF") lines.push("T2  - Proceedings of the Light Society");
+  if (r.chance(0.9)) lines.push(`${r.pick(["PY", "Y1", "DA"])}  - ${r.pick([`${r.int(1950, 2025)}`, `${r.int(1950, 2025)}///`, `${r.int(1950, 2025)}/${String(r.int(1, 12)).padStart(2, "0")}/${String(r.int(1, 28)).padStart(2, "0")}/`, `${r.int(1950, 2025)}/${String(r.int(1, 12)).padStart(2, "0")}`])}`);
+  if (r.chance(0.5)) lines.push(`VL  - ${r.int(1, 99)}`);
+  if (r.chance(0.4)) lines.push(`IS  - ${r.int(1, 12)}`);
+  if (r.chance(0.5)) { lines.push(`SP  - ${r.int(1, 200)}`); lines.push(`EP  - ${r.int(201, 400)}`); }
+  if (r.chance(0.5)) lines.push(`PB  - ${r.pick(["Springer", "MIT Press", "Harbour & Sons"])}`);
+  if (r.chance(0.3)) lines.push(`CY  - ${r.pick(["Oslo", "London"])}`);
+  if (r.chance(0.4)) lines.push(`DO  - 10.${r.int(1000, 9999)}/abc.${r.int(1, 999)}`);
+  if (r.chance(0.3)) lines.push(`UR  - https://example.org/paper/${r.int(1, 99)}`);
+  if (r.chance(0.3)) lines.push(`SN  - ${r.pick(["978-3-16-148410-0", "1234-5678"])}`);
+  if (r.chance(0.2)) lines.push(`AB  - ${realTitle(r).replace(/[{}\\]/g, "")}. ${realTitle(r).replace(/[{}\\]/g, "")}.`);
+  if (r.chance(0.3)) lines.push(`KW  - sea`, `KW  - light`);
+  if (r.chance(0.2)) lines.push(`LA  - ${r.pick(["en", "English", "de"])}`);
+  if (r.chance(0.2)) lines.push(`ID  - ${r.pick(["doe2020", "ref1", "smith1999a"])}${r.int(1, 99)}`);
+  if (r.chance(0.1)) lines.push(`ET  - 2`);
+  if (r.chance(0.1)) lines.push(`N1  - A note`);
+  lines.push("ER  - ");
+  return lines.join("\n");
+}
+
+function realRisDocument(r: Rng): string {
+  const text = Array.from({ length: r.int(1, 5) }, () => realRisRecord(r)).join("\n\n") + "\n";
+  return r.chance(0.3) ? text.replace(/\n/g, "\r\n") : text;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Categories.
 
 type Case = { category: string; filename: string; text: string };
@@ -497,6 +594,8 @@ const CATEGORIES: Array<[string, number, Gen]> = [
     const text = r.chance(0.05) ? r.pick(["", " ", "\n\t", "\u00a0", "\ufeff", "\ufeff \u2028", "\u3000"]) : lead + body;
     return { filename, text };
   }],
+  ["bibtex/realistic", 3000, (r) => ({ filename: "refs.bib", text: realBibDocument(r) })],
+  ["ris/realistic", 3000, (r) => ({ filename: "refs.ris", text: realRisDocument(r) })],
   ["noise", 1500, (r) => ({
     filename: r.pick(["", "a.bib", "a.ris", "a.json"]),
     text: Array.from({ length: r.int(0, 60) }, () => r.pick(ODD_CHARS)).join("")
