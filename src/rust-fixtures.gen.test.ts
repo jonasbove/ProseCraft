@@ -1831,3 +1831,64 @@ it.skipIf(!OUT)("writes custom style fixtures", async () => {
     pdf
   });
 });
+
+it.skipIf(!OUT)("writes cover fixtures", async () => {
+  const { listManuscriptSections } = await import("$lib/publish/sections");
+  const { exportPdf } = await import("$lib/publish/pdf");
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAAFElEQVR4nGM4oaHxX0PjxH8GDAYAo7MMizQEbkMAAAAASUVORK5CYII=";
+  const rawCovers: unknown[] = [
+    undefined, null, "image", [],
+    { mode: "generated", design: "bold", palette: "plum", image: png },
+    { mode: "image", image: "https://example.com/c.png", design: "wavy", palette: "neon" },
+    { mode: "image", image: png },
+    { mode: "image", image: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" },
+    { mode: "none", image: png, design: "minimal", palette: "ocean" },
+    { mode: 3, design: "modern", palette: "sage" }
+  ];
+  const normalized = rawCovers.map((cover) => normalizePublishOptions({ cover }).cover);
+  // jsdom never loads an <img>: this one reports the test PNG's size.
+  class LoadedImage {
+    naturalWidth = 2;
+    naturalHeight = 3;
+    onload: () => void = () => {};
+    onerror: () => void = () => {};
+    set src(_value: string) { queueMicrotask(() => this.onload()); }
+  }
+  vi.stubGlobal("Image", LoadedImage);
+  const project = bookProject();
+  const exports: Record<string, unknown> = {};
+  const variants: Record<string, Record<string, unknown>> = {
+    image: { style: "classic", cover: { mode: "image", image: png } },
+    imageNoTitle: { style: "modern", includeTitlePage: false, includeTableOfContents: true, cover: { mode: "image", image: png } },
+    noneButCover: { cover: { mode: "none" } }
+  };
+  for (const [name, raw] of Object.entries(variants)) {
+    const options = normalizePublishOptions(raw);
+    const live = project.chapters.filter((c) => !c.trashed);
+    const compiled = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    const cover = { dataUrl: png, width: 2, height: 3, mediaType: "image/png" as const, background: "#783478" };
+    const book = { ...compiled, cover };
+    const files = unzipSync(new Uint8Array(await (await exportEpub(book, options)).blob.arrayBuffer()));
+    const entries = Object.entries(files).map(([entry, bytes]) => ({
+      name: entry,
+      text: entry.endsWith(".png") ? Buffer.from(bytes).toString("base64") : strFromU8(bytes)
+        .replace(/urn:uuid:[0-9a-f-]{36}/g, "urn:uuid:ID")
+        .replace(/<meta property="dcterms:modified">[^<]*<\/meta>/, '<meta property="dcterms:modified">MODIFIED</meta>')
+    }));
+    const pdf = Buffer.from(new Uint8Array(await exportPdf(book, options).blob.arrayBuffer())).toString("base64");
+    exports[name] = {
+      options: raw,
+      cover,
+      sections: listManuscriptSections(book, options).map((s) => s.id),
+      html: await exportHtml(book, options).blob.text(),
+      epub: entries,
+      pdf
+    };
+  }
+  vi.unstubAllGlobals();
+  write("cover.json", { png, rawCovers: rawCovers.map((c) => (c === undefined ? "UNDEFINED" : c)), normalized, project, exports });
+}, 30_000);
