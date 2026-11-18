@@ -1726,3 +1726,112 @@ it.skipIf(!OUT)("writes pdf standard font metrics and measurements", async () =>
   }
   write("pdf-standard-fonts.json", { generator: "jspdf standard_fonts_metrics", encoding, fonts, measured, splits });
 });
+
+/** A long novel-like project for the PDF layout: wrapping, justification, page breaks, many chapters. */
+function longProject(): ProjectData {
+  const words = "the lighthouse keeper climbed stairs every evening counting steps as his father had and wondering whether anyone across cold water still watched light at all while gulls wheeled over rocks below".split(" ");
+  let seed = 7;
+  const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+  const sentence = (n: number) => {
+    const out: string[] = [];
+    for (let i = 0; i < n; i += 1) out.push(words[next() % words.length]);
+    const s = out.join(" ");
+    return s[0].toUpperCase() + s.slice(1) + (next() % 5 === 0 ? "—“quoted,” he said." : ".");
+  };
+  const paragraph = () => Array.from({ length: 2 + (next() % 5) }, () => sentence(6 + (next() % 14))).join(" ");
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const chapters = Array.from({ length: 34 }, (_, i) => ({ id: `ch-${i + 1}`, title: i === 3 ? "A Rather Long Chapter Title That Needs To Wrap Somewhere Along The Line" : `Chapter ${i + 1}`, expanded: true }));
+  const documents = chapters.flatMap((chapter, i) => Array.from({ length: i < 4 ? 3 : 1 }, (_, s) => {
+    const id = `${chapter.id}-s${s + 1}`;
+    let content = Array.from({ length: i < 4 ? 6 : 2 }, () => `<p>${paragraph()}</p>`).join("");
+    const footnotes = [];
+    if (s === 0 && i < 4) {
+      content = `<p class="eyebrow">Part ${i + 1}</p>` + content
+        + `<h3>A heading <em>here</em></h3><blockquote><p>${sentence(20)}</p></blockquote><ol><li>${sentence(4)}</li><li>${sentence(25)}</li></ul>`
+        + `<p>See note<sup class="footnote-ref" data-footnote-id="n${i}" contenteditable="false"></sup> and <u>underlined</u> and <s>struck</s> and a <a href="https://example.org">link</a>.</p>`
+        + `<p>Equation <img src="${png}" data-inline="true" alt="eq" width="40" height="20"> inline.</p><p><img src="${png}" alt="Block" width="200" height="100"></p>`
+        + `<p>Supercalifragilisticexpialidociousandthenafewmorelettersjusttooverflowanywholelinewidthforsure end.</p>`;
+      footnotes.push({ id: `n${i}`, html: `A footnote for chapter ${i + 1} with <em>style</em>.` });
+    }
+    return { id, title: `Scene ${s + 1}`, chapterId: chapter.id, content, footnotes };
+  }));
+  return {
+    id: "long", name: "The Long Light", author: "A. Writer", activeDocumentId: documents[0].id, projectGoal: 0, chapterGoals: {}, activity: {},
+    documents, chapters, storyboardRows: [], storyboardCards: [], storyboardDrawings: [], timelineNodes: [], noteFolders: []
+  } as unknown as ProjectData;
+}
+
+it.skipIf(!OUT)("writes PDF export fixtures", async () => {
+  const { exportPdf } = await import("$lib/publish/pdf");
+  const variants: Array<[string, () => ProjectData, Record<string, unknown>]> = [
+    ["defaults", bookProject, {}],
+    ["everything", bookProject, {
+      style: "modern", includeTableOfContents: true, includeSceneTitles: true, includeCopyrightPage: true,
+      sceneSeparator: "asterisks", subtitle: "A Novel <&>", copyright: "© 2026 A. Writer\nAll rights reserved.", dedication: "For the keepers, who stayed up through every storm and every calm.",
+      frontMatter: [{ id: "f1", title: "Epigraph", body: "Some words.\n\nMore & more." }, { id: "f2", title: "", body: "", blank: true }],
+      backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }]
+    }],
+    ["classicPerChapter", bookProject, { style: "classic", footnotesRestartPerChapter: true, sceneSeparator: "line", includeChapterTitles: false, dropCaps: true }],
+    ["ebook", bookProject, { style: "ebook", sceneSeparator: "none", includeTitlePage: false }],
+    ["longManuscript", longProject, { includeTableOfContents: true, copyright: "© 2026 A. Writer. A long copyright line that wraps around the title page once or twice for good measure." }],
+    ["longClassic", longProject, { style: "classic", includeTableOfContents: true, dropCaps: true, sceneSeparator: "hash", pageBreakBeforeChapters: false, includeSceneTitles: true }],
+    ["longModern", longProject, { style: "modern", sceneSeparator: "line", dedication: "For everyone.\nEspecially you." }]
+  ];
+  const out: Record<string, unknown> = {};
+  const projects: Record<string, unknown> = {};
+  for (const [name, make, raw] of variants) {
+    const project = make();
+    projects[project.id] = project;
+    const options = normalizePublishOptions(raw);
+    const live = project.chapters.filter((c) => !c.trashed);
+    const book = compileBook({
+      title: project.name, author: project.author, subtitle: options.subtitle, copyright: options.copyright,
+      dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+      chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
+    });
+    const payload = exportPdf(book, options);
+    const bytes = new Uint8Array(await payload.blob.arrayBuffer());
+    out[name] = { project: project.id, options: raw, pdf: Buffer.from(bytes).toString("base64") };
+  }
+  write("export-pdf.json", { projects, exports: out });
+});
+
+it.skipIf(!OUT)("writes screenplay PDF fixtures", async () => {
+  const { parseFountain } = await import("$lib/screenplay/fountain");
+  const { buildScreenplayPdf } = await import("$lib/screenplay/pdf");
+  const scene = (n: number) => `INT. LIGHTHOUSE ${n} - NIGHT
+
+Waves crash against the rocks, and the lamp turns slowly above the black water. Mara climbs the long stair with a lantern in one hand and a letter in the other, counting the steps.
+
+MARA
+(quietly)
+Is anyone there? I have walked all the way up the stairs, and nobody answered the bell, and the light is still burning as if someone were keeping it.
+
+THE KEEPER (V.O.)
+Only the gulls.
+
+MARA
+(to herself)
+Then who wrote this?
+
+> CUT TO:
+
+> THE END OF PART ${n} <
+
+[[A note that is not printed.]]
+
+= A synopsis that is not printed.
+`;
+  const scripts: Record<string, { title: string; author: string; source: string }> = {
+    short: { title: "The Lighthouse", author: "A. Writer", source: scene(1) },
+    long: { title: "A Very Long Screenplay Title That Wraps On The Title Page", author: "A. Writer & B. Writer", source: Array.from({ length: 14 }, (_, i) => scene(i + 1)).join("\n===\n\n") },
+    untitled: { title: "", author: "", source: `EXT. BEACH - DAY\n\n${"A very long action line that goes on and on. ".repeat(40)}\n\nSUPERCALIFRAGILISTICEXPIALIDOCIOUSANDMORE\nWords.` }
+  };
+  const out: Record<string, unknown> = {};
+  for (const [name, script] of Object.entries(scripts)) {
+    const { elements } = parseFountain(script.source);
+    const bytes = buildScreenplayPdf({ title: script.title, author: script.author, elements });
+    out[name] = { title: script.title, author: script.author, elements, pdf: Buffer.from(bytes).toString("base64") };
+  }
+  write("export-screenplay-pdf.json", out);
+});
