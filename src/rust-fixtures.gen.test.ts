@@ -1807,6 +1807,7 @@ it.skipIf(!OUT)("writes custom style fixtures", async () => {
   (crypto as { randomUUID: () => string }).randomUUID = realUuid;
   const project = bookProject();
   const html: Record<string, string> = {};
+  const pdf: Record<string, string> = {};
   for (const style of ["custom-a", "custom-b"]) {
     const options = normalizePublishOptions({ style, customStyles: raw, dropCaps: true, includeTableOfContents: true });
     const live = project.chapters.filter((c) => !c.trashed);
@@ -1816,6 +1817,9 @@ it.skipIf(!OUT)("writes custom style fixtures", async () => {
       chapters: live, documents: project.documents, footnotesRestartPerChapter: options.footnotesRestartPerChapter
     });
     html[style] = await exportHtml(book, options).blob.text();
+    const { exportPdf } = await import("$lib/publish/pdf");
+    const bytes = new Uint8Array(await exportPdf(book, options).blob.arrayBuffer());
+    pdf[style] = Buffer.from(bytes).toString("base64");
   }
   write("custom-styles.json", {
     raw: raw.map((r) => (typeof r === "object" && r && Number.isNaN((r as { lineHeight?: number }).lineHeight) ? { ...r, lineHeight: "NaN" } : r)),
@@ -1823,6 +1827,7 @@ it.skipIf(!OUT)("writes custom style fixtures", async () => {
     tokens,
     created,
     project,
-    html
+    html,
+    pdf
   });
 });
