@@ -149,6 +149,48 @@ describe("encrypted single-file sync", () => {
 });
 
 describe("open-folder sync", () => {
+  it("counts moving a whole project to the trash as a change", () => {
+    const original = storedProject(1_000);
+    const trashed = stampProject(original, { ...original.project, trashed: true }, "device-a", 2_000);
+    expect(trashed.revision).toBeGreaterThan(original.revision);
+    expect(trashed.updatedAt).toBe(2_000);
+
+    const { trashed: _restored, ...restoredData } = trashed.project;
+    const restored = stampProject(trashed, restoredData, "device-a", 3_000);
+    expect(restored.revision).toBeGreaterThan(trashed.revision);
+  });
+
+  it("moves a project to the trash on the other device too", async () => {
+    const fs = new MemoryFileSystem();
+    const provider = () => new OpenFolderSyncProvider(fs);
+    const onA = await provider().sync("", [storedProject(1_000)], {}, 1_000, "device-a");
+    const onB = await provider().sync("", [], {}, 1_100, "device-b");
+
+    const trashed = stampProject(onA.projects[0], { ...onA.projects[0].project, trashed: true }, "device-a", 2_000);
+    await provider().sync("", [trashed], onA.lastSynced, 2_000, "device-a");
+    const afterB = await provider().sync("", onB.projects, onB.lastSynced, 3_000, "device-b");
+
+    expect(afterB.projects.find((project) => project.id === "project-1")?.project.trashed).toBe(true);
+  });
+
+  it("keeps a project in the trash when another device edited it meanwhile", async () => {
+    const fs = new MemoryFileSystem();
+    const first = await new OpenFolderSyncProvider(fs)
+      .sync("", [storedProject(1_000)], {}, 1_000, "device-a");
+    const synced = first.projects[0];
+
+    // Device B edits the project and syncs first.
+    const edited = stampProject(synced, { ...synced.project, author: "Someone Else" }, "device-b", 2_000);
+    await new OpenFolderSyncProvider(fs).sync("", [edited], first.lastSynced, 2_000, "device-b");
+
+    // Device A moved the same project to the trash and syncs afterwards.
+    const trashed = stampProject(synced, { ...synced.project, trashed: true }, "device-a", 3_000);
+    const result = await new OpenFolderSyncProvider(fs)
+      .sync("", [trashed], first.lastSynced, 3_000, "device-a");
+
+    expect(result.projects.find((project) => project.id === "project-1")?.project.trashed).toBe(true);
+  });
+
   it("round-trips recoverable project, chapter, and scene trash state", async () => {
     const fs = new MemoryFileSystem();
     const project = storedProject();
@@ -435,6 +477,42 @@ describe("open-folder sync", () => {
     expect(project.project.documents[0].content).toContain("<strong>bright</strong>");
   });
 
+  it("keeps syncing after a document file is renamed by hand", async () => {
+    const fs = new MemoryFileSystem();
+    const provider = () => new OpenFolderSyncProvider(fs);
+    const first = await provider().sync("", [storedProject()], {}, 1_000, "device-a");
+    const original = "projects/project-1/documents/doc-1.md";
+    await fs.writeText("projects/project-1/documents/Opening.md", await fs.readText(original));
+    await fs.remove(original);
+
+    const second = await provider().sync("", first.projects, first.lastSynced, 2_000, "device-a");
+    await provider().sync("", second.projects, second.lastSynced, 3_000, "device-a");
+
+    expect(await fs.exists(original)).toBe(true);
+    expect(await fs.exists("projects/project-1/documents/Opening.md")).toBe(false);
+  });
+
+  it("does not bring back scenes the winning side of a project conflict lacks", async () => {
+    const fs = new MemoryFileSystem();
+    const provider = () => new OpenFolderSyncProvider(fs);
+    // Another device wrote the project with both scenes.
+    await provider().sync("", [storedProject(1_000)], {}, 1_000, "device-b");
+    // This device has an unrelated, newer copy of the same project without doc-2.
+    const onlyFirst: ProjectData = {
+      ...projectFixture(),
+      name: "Local edit",
+      documents: projectFixture().documents.filter((doc) => doc.id !== "doc-2")
+    };
+    const older = createStoredProject({ ...onlyFirst, name: "Test Novel" }, "device-a", 500);
+    const local = stampProject(older, onlyFirst, "device-a", 3_000);
+    await provider().sync("", [local], {}, 3_000, "device-a");
+
+    const reopened = await provider().connect("");
+    const winner = reopened.projects.find((project) => project.id === "project-1");
+    expect(winner?.project.name).toBe("Local edit");
+    expect(winner?.project.documents.map((doc) => doc.id)).not.toContain("doc-2");
+  });
+
   it("writes tombstones and removes deleted entity files", async () => {
     const fs = new MemoryFileSystem();
     const original = storedProject(1_000);
@@ -511,6 +589,58 @@ describe("encrypted-folder sync", () => {
     const reopened = await new FolderSyncProvider(fs).connect(PASSPHRASE);
     expect(reopened.projects).toHaveLength(1);
     expect(reopened.projects[0].project.name).toBe("Test Novel");
+  });
+
+  it("keeps files it did not write, such as another sync tool's conflict copies", async () => {
+    const fs = new MemoryFileSystem();
+    const first = await new FolderSyncProvider(fs)
+      .sync(PASSPHRASE, [storedProject()], {}, 1_000, "device-a");
+    const copies = [
+      "projects/project-1/documents/doc-1 (conflict 2026-11-17 14.32 Laptop).enc",
+      "projects/project-1/documents/doc-1.sync-conflict-20261117-143200-ABCDEFG.enc",
+      "projects/project-1/chapters/chapter-1 (conflicted copy).enc"
+    ];
+    for (const copy of copies) {
+      await fs.writeText(copy, await fs.readText("projects/project-1/documents/doc-1.enc"));
+    }
+
+    await new FolderSyncProvider(fs)
+      .sync(PASSPHRASE, first.projects, first.lastSynced, 2_000, "device-a");
+
+    for (const copy of copies) expect(await fs.exists(copy)).toBe(true);
+  });
+
+  it("still cleans up files the winning side of a project conflict no longer has", async () => {
+    const fs = new MemoryFileSystem();
+    await new FolderSyncProvider(fs).sync(PASSPHRASE, [storedProject(1_000)], {}, 1_000, "device-b");
+    const onlyFirst: ProjectData = {
+      ...projectFixture(),
+      name: "Local edit",
+      documents: projectFixture().documents.filter((doc) => doc.id !== "doc-2")
+    };
+    const older = createStoredProject({ ...onlyFirst, name: "Test Novel" }, "device-a", 500);
+    const local = stampProject(older, onlyFirst, "device-a", 3_000);
+    await new FolderSyncProvider(fs).sync(PASSPHRASE, [local], {}, 3_000, "device-a");
+
+    expect(await fs.exists("projects/project-1/documents/doc-2.enc")).toBe(false);
+  });
+
+  it("still removes the files of deleted entities", async () => {
+    const fs = new MemoryFileSystem();
+    const original = storedProject(1_000);
+    await new FolderSyncProvider(fs).sync(PASSPHRASE, [original], {}, 1_000, "device-a");
+    expect(await fs.exists("projects/project-1/documents/doc-1.enc")).toBe(true);
+
+    const withoutDocument: ProjectData = {
+      ...projectFixture(),
+      activeDocumentId: "doc-2",
+      documents: projectFixture().documents.filter((doc) => doc.id !== "doc-1")
+    };
+    const updated = stampProject(original, withoutDocument, "device-a", 2_000);
+    await new FolderSyncProvider(fs).sync(PASSPHRASE, [updated], {}, 2_000, "device-a");
+
+    expect(await fs.exists("projects/project-1/documents/doc-1.enc")).toBe(false);
+    expect(await fs.exists("projects/project-1/documents/doc-2.enc")).toBe(true);
   });
 });
 
