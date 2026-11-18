@@ -1645,3 +1645,42 @@ it.skipIf(!OUT)("writes editor citation label fixtures", async () => {
   cases.push({ style: "apa7", locale: "en", empty: true, labels: Array.from(emptyRoot.querySelectorAll("span.cite-ref")).map((e) => e.getAttribute("data-label")) });
   write("citation-labels.json", { library, markers, cases });
 });
+
+it.skipIf(!OUT)("writes publish rich text fixtures", async () => {
+  const { blocksFromHtml, inlineRunsFromHtml } = await import("$lib/publish/rich-text");
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  const jpg = "data:image/jpeg;base64,/9j/4AAQ";
+  const fn = (id: string) => `<sup class="footnote-ref" data-footnote-id="${id}" contenteditable="false"></sup>`;
+  const html = [
+    "", "<p></p>", "<p><br></p>", "plain text at the top", "  spaced \n text  ", "<p>One</p><p>Two</p>",
+    "<p>A <strong>bold</strong>, <b>b</b>, <em>em</em>, <i>i</i>, <u>u</u>, <s>s</s>, <strike>k</strike> and <del>del</del>.</p>",
+    "<p><strong>Bold <em>and italic <u>and under</u></em></strong> plain</p>",
+    "<p>Link <a href=\"https://example.org\">here</a>, <a href=\"\">empty</a>, <a>none</a>.</p>",
+    "<p>Line<br>break<br><br>twice</p>", "<p><br>Leading break</p>", "<p>  Trim  me </p>", "<p> </p>",
+    `<p>Note${fn("fn-1")} here${fn("bad id!")}.</p>`, `<p>${fn("fn-2")}</p>`,
+    "<h1>Title</h1><h2>Sub <em>head</em></h2><h3>Third</h3><h4>Fourth</h4>",
+    "<blockquote><p>Quoted one</p><p>Quoted two</p></blockquote>", "<blockquote>Bare quote <b>bold</b></blockquote>",
+    "<blockquote><div>In div</div></blockquote>",
+    "<ul><li>One</li><li>Two <em>em</em></li><li></li></ul>", "<ol><li>First</li><li>Second</li><p>stray</p><li>Third</li></ol>",
+    "<ul><li>Outer<ul><li>Inner</li></ul></li></ul>", "<li>Lone item</li>",
+    "<p class=\"eyebrow\">A NOTE</p><div class=\"eyebrow\">Not one</div>",
+    "<div>Plain div</div><div><p>Nested one</p><p>Nested two</p></div><p>Before<div>split</div>after</p>",
+    "<section>Section text</section><span>Span text</span><strong>Top bold</strong>",
+    `<p>Before<img src="${png}" alt="Pic">after</p>`, `<p><img src="${png}" width="120" height="80" alt="Sized"></p>`,
+    `<img src="${jpg}" alt="Top level" width="10">`, `<p>Inline <img src="${png}" data-inline="true" alt="eq" width="12px" data-display-height="9"> math</p>`,
+    `<p><img src="https://example.org/x.png" alt="Remote"></p>`, `<p><img src="data:image/gif;base64,R0lGOD" alt="Gif"></p>`,
+    `<p><em>Em <img src="${png}" alt="In em"> tail</em></p>`, `<div><p>A</p><img src="${png}" alt="B"><p>C</p></div>`,
+    `<p><img src="${png}" width="-3" height="abc"></p>`, `<p>Sized inline <img src="${png}" data-inline="true" data-display-width="30" alt="w"></p>`,
+    "<!-- comment --><p>After comment</p>", "<table><tr><td>Cell</td></tr></table>", "<pre>pre  formatted\ntext</pre>",
+    "<p>Tab\tand\nnewline</p>", "<p><span class=\"cite-ref\" data-cites=\"x\">(Smith)</span> cited</p>",
+    "<p><code>code</code> and <sup>sup</sup> and <sub>sub</sub></p>"
+  ];
+  const inline = [
+    "", "Plain note.", "A <em>styled</em> <a href=\"https://x.y\">note</a>.", "  spaced  ", "<p>In a paragraph</p><p>and another</p>",
+    "Line<br>break", `With image <img src="${png}" alt="i"> inline`, `Ref ${fn("fn-9")}`
+  ];
+  write("publish-rich-text.json", {
+    blocks: html.map((input) => ({ input, blocks: blocksFromHtml(input) })),
+    inline: inline.map((input) => ({ input, runs: inlineRunsFromHtml(input) }))
+  });
+});
