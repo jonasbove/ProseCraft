@@ -1684,3 +1684,45 @@ it.skipIf(!OUT)("writes publish rich text fixtures", async () => {
     inline: inline.map((input) => ({ input, runs: inlineRunsFromHtml(input) }))
   });
 });
+
+it.skipIf(!OUT)("writes pdf standard font metrics and measurements", async () => {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: [432, 648], compress: true });
+  const fonts: Record<string, unknown> = {};
+  let encoding: unknown = null;
+  for (const family of ["times", "helvetica", "courier"]) {
+    for (const style of ["normal", "bold", "italic", "bolditalic"]) {
+      doc.setFont(family, style);
+      const font = doc.getFont();
+      const unicode = font.metadata.Unicode;
+      encoding = unicode.encoding.WinAnsiEncoding;
+      const widths = Object.entries(unicode.widths).filter(([k]) => k !== "fof").map(([k, v]) => [Number(k), v]);
+      const kerning = Object.entries(unicode.kerning).filter(([k]) => k !== "fof")
+        .flatMap(([cur, row]) => Object.entries(row as Record<string, number>).map(([prev, v]) => [Number(cur), Number(prev), v]));
+      fonts[`${family}/${style}`] = { postScriptName: font.postScriptName, widthsFof: unicode.widths.fof ?? 1, kerningFof: unicode.kerning.fof ?? 1, widths, kerning };
+    }
+  }
+  const samples = ["", " ", "A", "AV", "To", "Wave", "Café naïve", "He said “yes” — then left.", "It’s fine… €5", "Łódź", "日本語", "😀 emoji", "fi fl", "Chapter 12", "THE END"];
+  const measured: unknown[] = [];
+  for (const family of ["times", "helvetica", "courier"]) {
+    for (const style of ["normal", "bold", "italic", "bolditalic"]) {
+      doc.setFont(family, style);
+      for (const size of [8.5, 12, 31.05]) {
+        doc.setFontSize(size);
+        for (const text of samples) measured.push({ family, style, size, text, width: doc.getTextWidth(text) });
+      }
+    }
+  }
+  const long = "The lighthouse keeper climbed the long stairs every evening, counting the steps as his father had, and wondering whether anyone across the water still watched the light at all. Supercalifragilisticexpialidociousandthensomemoretomakeitlonger end.";
+  const splits: unknown[] = [];
+  for (const family of ["times", "helvetica"]) {
+    for (const [size, width] of [[12, 300], [31.05, 288], [8.5, 120], [12, 40]] as const) {
+      doc.setFont(family, "normal");
+      doc.setFontSize(size);
+      for (const text of [long, "A Title\nOn Two Lines", "Short", "", "  spaced  out  "]) {
+        splits.push({ family, size, width, text, lines: doc.splitTextToSize(text, width) });
+      }
+    }
+  }
+  write("pdf-standard-fonts.json", { generator: "jspdf standard_fonts_metrics", encoding, fonts, measured, splits });
+});
