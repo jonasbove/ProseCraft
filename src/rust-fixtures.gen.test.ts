@@ -1684,3 +1684,154 @@ it.skipIf(!OUT)("writes publish rich text fixtures", async () => {
     inline: inline.map((input) => ({ input, runs: inlineRunsFromHtml(input) }))
   });
 });
+
+/**
+ * DOCX export: ProseCraft's real `exportDocx` on books that reach every branch of docx.ts.
+ * Each case is a project compiled as the Publish view compiles it, then prepared as
+ * `renderExport` prepares it: a cover attached, and each math placeholder replaced by the inline
+ * image `prepareBookRichContent` would draw (the `prepared` pairs, applied to the scene HTML).
+ * jsdom decodes no images, so `Image` is stood in for by one that reads the PNG or JPEG header for
+ * the natural size, which is all `decodeEmbeddedImage` takes from it (WebP needs a canvas and is
+ * left out).
+ */
+it.skipIf(!OUT)("writes DOCX export fixtures", async () => {
+  const { exportDocx } = await import("$lib/publish/docx");
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAIAAABwJOjsAAAAJ0lEQVR42mM8oaHBMBCAiWGAwKjFoxaPWjxq8ajFoxaPWjxqMf0BABx5AUDXN5muAAAAAElFTkSuQmCC";
+  const JPG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAyAB4DASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDLooor3jzwooooAKKKKACiiigAooooAKKKKACiiigAooooA//Z";
+  const WIDE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABLAAAAEsCAIAAABc390HAAAF0UlEQVR42u3XMQEAAAQAQcSUTlQhjO4i/PbZ0wEAAMA/JQEAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAGEIAAAAMIQAAAIYQAAAAQwgAAIAhBAAAwBACAABgCAEAADCEAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAEMoAQAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAABDCAAAgCEEAADAEAIAAGAIAQAAMIQAAAAYQgAAAAwhAAAAhhAAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAYAgBAAAwhAAAABhCAAAADCEAAACGEAAAAEMIAACAIQQAAMAQAgAAcLWyfAOsFu0+sgAAAABJRU5ErkJggg==";
+  // A 2:3 cover (600 × 900), the shape ProseCraft's cover cropper produces.
+  const COVER_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAAOECAIAAADyj9hrAAAKrElEQVR42u3VQREAMAjAsDENyEEJ/oVggzsSCf00svoBwFVfAgCMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBMAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIATBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQACOUAAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBMAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIATBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEwAglAMAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIAcAIATBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBwAgBMEIJADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCADBCAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQAIwQACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEACMEgI0GEfMHsiJgH9QAAAAASUVORK5CYII=";
+
+  class HeaderImage {
+    naturalWidth = 0;
+    naturalHeight = 0;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    set src(value: string) {
+      const size = imageSize(value);
+      queueMicrotask(() => {
+        if (!size) {
+          this.onerror?.();
+          return;
+        }
+        [this.naturalWidth, this.naturalHeight] = size;
+        this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal("Image", HeaderImage);
+
+  const fn = (id: string) => `<sup class="footnote-ref" data-footnote-id="${id}" contenteditable="false"></sup>`;
+  const cite = (items: Array<Record<string, unknown>>) =>
+    `<span class="cite-ref" data-cites="${JSON.stringify(items).replace(/"/g, "&quot;")}" contenteditable="false"></span>`;
+  const math = (tex: string) => `<span class="math-inline" data-tex="${tex}"></span>`;
+  const citations = [
+    { id: "smith2020", type: "book", title: "Lighthouses", author: [{ family: "Smith", given: "Jo" }], issued: { "date-parts": [[2020]] }, publisher: "Harbour Press" },
+    { id: "web", type: "webpage", title: "A <i>blog</i> post", author: [{ family: "Doe", given: "Jane" }], issued: { "date-parts": [[2021]] }, URL: "https://example.org/post" }
+  ];
+  const project = (author: string): ProjectData => ({
+    id: "docx-project",
+    name: "  The Keeper’s Light  ",
+    author,
+    kind: "novel",
+    activeDocumentId: "s1",
+    chapters: [
+      { id: "c1", title: "Chapter One", expanded: true },
+      { id: "c2", title: "The Storm", expanded: true },
+      { id: "c3", title: "Gone", expanded: true, trashed: true },
+      { id: "c4", title: "Chapter 9", expanded: true }
+    ],
+    citations,
+    documents: [
+      {
+        id: "s1", title: "Arrival", chapterId: "c1",
+        content: `<p class="eyebrow">Part one</p><p>  “Well,” she said, <em>quietly</em> and <strong>boldly <em>both</em></strong>, <u>under</u> <s>struck</s> <a href="https://example.org/a?b=1&amp;c=2">a link</a>.${fn("n1")}</p>`
+          + `<p>Second paragraph<br>with a break<br><br>and two.</p><h1>Heading one</h1><h2>Heading <em>two</em></h2><h3>Heading three</h3><h4>Fourth level</h4>`
+          + `<blockquote><p>Quoted words.</p><p>More quote.</p></blockquote><ul><li>Bread</li><li>Salt <em>and</em> pepper</li></ul><ol><li>First</li><li>Second</li></ol>`
+          + `<p>Math ${math("x^2")} inline, ${math("y")} twice.${fn("n2")}</p>`,
+        footnotes: [{ id: "n1", html: "A note with <em>emphasis</em> and <a href=\"https://example.org/n\">a link</a>." }, { id: "n2", html: "" }]
+      },
+      {
+        id: "s2", title: "Pictures", chapterId: "c1",
+        content: `<p>A picture follows.</p><p><img src="${PNG}" alt="A red box" width="400" height="200"></p><p>Before <img src="${JPG}" alt=""> after.</p><p><img src="${WIDE}" alt="Wide"></p><p><img src="${PNG}" alt="Tall" width="20" height="2000"></p>`
+      },
+      { id: "s3", title: "", chapterId: "c1", content: `<p>Third scene ${cite([{ id: "smith2020", locator: "4", label: "page" }])}.</p>` },
+      { id: "s4", title: "Rain", chapterId: "c2", content: `<h2>Opening heading</h2><p>Rain fell${fn("m1")} on ${cite([{ id: "web" }])} the roofs.${fn("m2")}</p><p>And then it stopped.</p>`, footnotes: [{ id: "m1", html: "First of the chapter." }, { id: "m2", html: "Second <strong>note</strong>." }] },
+      { id: "s5", title: "Wind", chapterId: "c2", content: "<p>Wind.</p>" },
+      { id: "s6", title: "Lost", chapterId: "c3", content: "<p>Never seen.</p>" },
+      { id: "s7", title: "Late", chapterId: "c4", content: `<p>${fn("z1")}Last chapter, opening on a note.</p>`, footnotes: [{ id: "z1", html: "The end." }] },
+      { id: "w1", title: "Wiki", space: "Wiki", content: "<p>Not in the book.</p>" }
+    ]
+  }) as unknown as ProjectData;
+  // The last project has no chapters at all: a document of one empty section.
+  const projects = [project("A. Writer"), project(""), { ...project("Nobody"), chapters: [], documents: [] } as ProjectData];
+  const matter = {
+    frontMatter: [{ id: "f1", title: "Epigraph", body: "Some words.\nOn two lines.\n\n  Another paragraph.  " }, { id: "f2", title: "", body: "", blank: true }, { id: "f3", title: "", body: "Untitled page text." }],
+    backMatter: [{ id: "b1", title: "Acknowledgments", body: "Thank you." }, { id: "b2", title: "", body: "", blank: true }]
+  };
+  const cases: Array<{ name: string; project: number; options: Record<string, unknown>; cover?: string }> = [
+    { name: "manuscript", project: 0, options: { subtitle: "A Novel", copyright: "© 2026 A. Writer\nAll rights reserved.", dedication: "For the keepers.\nAll of them." } },
+    { name: "classic", project: 0, cover: COVER_PNG, options: { style: "classic", includeCopyrightPage: true, includeTableOfContents: true, includeSceneTitles: true, sceneSeparator: "asterisks", footnotesRestartPerChapter: true, copyright: "© 2026", dedication: "For you.", citationStyle: "chicago-notes", ...matter } },
+    { name: "modern", project: 0, options: { style: "modern", sceneSeparator: "line", includeChapterTitles: false, footnotesRestartPerChapter: true, pageBreakBeforeChapters: false, subtitle: "Stories", citationStyle: "apa7", backMatter: matter.backMatter } },
+    { name: "ebook", project: 1, options: { style: "ebook", includeTitlePage: false, sceneSeparator: "blank", dedication: "Only a dedication.", pageBreakBeforeChapters: false, includeBibliography: false, includeTableOfContents: true } },
+    { name: "plain", project: 1, options: { includeChapterTitles: false, sceneSeparator: "none", dropCaps: false, includeTitlePage: true, includeCopyrightPage: true, citationStyle: "ieee", frontMatter: matter.frontMatter } },
+    { name: "classic-continuous", project: 1, options: { style: "classic", sceneSeparator: "hash", includeTitlePage: false, includeSceneTitles: true, copyright: "© Someone", includeCopyrightPage: true } },
+    { name: "empty", project: 2, options: { includeTitlePage: false } }
+  ];
+  const prepared = [
+    [math("x^2"), `<img src="${PNG}" alt="x^2" data-inline="true" width="24" height="12">`],
+    [math("y"), `<img src="${JPG}" alt="y" data-inline="true">`]
+  ];
+  const out = [];
+  try {
+    for (const c of cases) {
+      const options = normalizePublishOptions({ ...c.options, format: "docx" });
+      const p = projects[c.project];
+      const book = compileBook({
+        title: p.name, author: p.author, subtitle: options.subtitle, copyright: options.copyright,
+        dedication: options.dedication, frontMatter: options.frontMatter, backMatter: options.backMatter,
+        chapters: p.chapters.filter((ch) => !ch.trashed), documents: p.documents,
+        footnotesRestartPerChapter: options.footnotesRestartPerChapter,
+        citations: p.citations, citationStyle: options.citationStyle, citationLocale: options.citationLocale,
+        includeBibliography: options.includeBibliography
+      });
+      for (const chapter of book.chapters) {
+        for (const scene of chapter.scenes) {
+          for (const [from, to] of prepared) scene.html = scene.html.split(from).join(to);
+        }
+      }
+      if (c.cover) book.cover = { dataUrl: c.cover, width: 600, height: 900, mediaType: "image/png", background: "#000000" } as never;
+      const payload = await exportDocx(book, options);
+      out.push({
+        name: c.name,
+        project: c.project,
+        options: c.options,
+        ...(c.cover ? { cover: c.cover } : {}),
+        filename: payload.filename,
+        docx: Buffer.from(await payload.blob.arrayBuffer()).toString("base64")
+      });
+    }
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  write("export-docx.json", { projects, prepared, cases: out });
+});
+
+/** The natural size of an embedded PNG or JPEG, read from its header. */
+function imageSize(src: string): [number, number] | null {
+  const match = /^data:image\/(png|jpeg);base64,(.*)$/.exec(src);
+  if (!match) return null;
+  const bytes = Buffer.from(match[2], "base64");
+  if (match[1] === "png") return bytes.length >= 24 ? [bytes.readUInt32BE(16), bytes.readUInt32BE(20)] : null;
+  let i = 2;
+  while (i + 9 < bytes.length) {
+    if (bytes[i] !== 0xff) return null;
+    const marker = bytes[i + 1];
+    const length = bytes.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return [bytes.readUInt16BE(i + 7), bytes.readUInt16BE(i + 5)];
+    }
+    i += 2 + length;
+  }
+  return null;
+}
