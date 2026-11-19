@@ -85,6 +85,10 @@
   import { centerCaretInViewport, scrollContainerOf } from "$lib/typewriter";
   import EditorFontPicker from "$lib/EditorFontPicker.svelte";
   import OutlineView from "$lib/OutlineView.svelte";
+  import StoryDataPanel from "$lib/StoryDataPanel.svelte";
+  import { shouldShowStoryData } from "$lib/story-data-visibility";
+  import { showCardInEditor } from "$lib/character-card-visibility";
+  import CharacterSheet from "$lib/CharacterSheet.svelte";
   import SearchDialog from "$lib/SearchDialog.svelte";
   import type { ReplaceResult } from "$lib/replace";
   import { findFirstMatch } from "$lib/search";
@@ -116,6 +120,7 @@
     canAddSplitPane,
     docTarget,
     fileTarget,
+    graphTarget,
     moveSplitPane,
     parseSplitTarget,
     openBeside,
@@ -150,6 +155,7 @@
     type ImportFolder,
     type MarkdownFile
   } from "$lib/import/markdown-folder";
+  import NetworkView from "$lib/NetworkView.svelte";
   import { parseFountain } from "$lib/screenplay/fountain";
   import {
     elementsToHtml,
@@ -211,10 +217,13 @@
     removeFootnote,
     renumberFootnoteMarkers,
     updateFootnote,
+    withFootnotes,
     type UndoFootnoteScopeEntry
   } from "$lib/footnotes";
   import {
     buildChapterHtml,
+    chapterSceneIds,
+    chapterSectionTargets,
     isSceneBreakElement,
     joinChapterMarkdown,
     sceneBreakHtml,
@@ -323,6 +332,7 @@
   } from "$lib/starters";
   import { migrateLegacyDocument, migrateProjectToWiki } from "$lib/wiki-migration";
   import { createWikiMentionMatcher } from "$lib/wiki-mentions";
+  import type { DocumentMeta, SheetTemplate } from "$lib/story-meta";
   import {
     createBundleText,
     createEncryptedBundleText,
@@ -458,7 +468,7 @@
     | { kind: "document"; document: DocumentData; depth: number }
     | { kind: "file"; item: ResearchFile; depth: number }
     | { kind: "link"; item: ResearchLink; depth: number };
-  type WorkspaceView = "outline" | "writing" | "storyboard" | "timeline" | "publish";
+  type WorkspaceView = "outline" | "writing" | "storyboard" | "timeline" | "network" | "publish";
 
   let editor: HTMLDivElement;
   type WikiMention = {
@@ -826,6 +836,7 @@
   let storyboardRows = $state<StoryboardRow[]>([]);
   let timelineNodes = $state<TimelineNode[]>([]);
   let workspaceView = $state<WorkspaceView>("writing");
+  let openCardFor = $state<string | null>(null);
   let writingSidebarState = {
     left: initialViewportWidth > 760,
     right: initialViewportWidth > 1050
@@ -841,6 +852,8 @@
   let chapters = $state<ChapterData[]>([]);
   let liveChapters = $derived(chapters.filter((chapter) => !chapter.trashed));
   let projectLabelList = $state<LabelDef[]>(DEFAULT_LABELS.map((label) => ({ ...label })));
+  let projectSheetTemplates = $state<SheetTemplate[]>([]);
+  let dismissedSuggestions = $state<string[]>([]);
   let labelFilter = $state("");
   let filterLabelDef = $derived(labelFilter ? labelById(projectLabelList, labelFilter) : undefined);
   let visibleChapters = $derived.by(() => {
@@ -1284,6 +1297,8 @@
       kind: activeProjectKind,
       author: authorName,
       labels: projectLabelList,
+      sheetTemplates: projectSheetTemplates,
+      dismissedSuggestions,
       documents,
       chapters,
       activeDocumentId,
@@ -1311,6 +1326,13 @@
    */
   function saveProjectSnapshot(activeId = activeProjectId) {
     saveVault($state.snapshot(projects), activeId);
+  }
+
+  /** Remembers a dismissed pair so the suggestion does not come back. */
+  function dismissRelationSuggestion(key: string) {
+    if (!activeProjectId || dismissedSuggestions.includes(key)) return;
+    dismissedSuggestions = [...dismissedSuggestions, key];
+    persistProjectCollection();
   }
 
   function persistProjectCollection() {
@@ -1403,6 +1425,8 @@
     authorName = project.author;
     activeProjectKind = projectKindOf(project);
     projectLabelList = projectLabels(project);
+    projectSheetTemplates = [...(project.sheetTemplates ?? [])];
+    dismissedSuggestions = [...(project.dismissedSuggestions ?? [])];
     labelFilter = "";
     researchFolders = normalizeBinderFolders(project.researchFolders);
     researchFolderName = normalizeResearchFolderName(project.researchFolderName);
@@ -3571,8 +3595,37 @@
     await tick();
   }
 
+  /**
+   * A screenplay scene can't go through markdown: its elements (`data-sp`)
+   * would come back as plain paragraphs. So a chapter holding one has no
+   * markdown editor.
+   */
+  function chapterHasScreenplayScene(chapterId: string | undefined): boolean {
+    return Boolean(chapterId)
+      && scenesInChapter(chapterId as string).some((doc) => doc.format === "screenplay");
+  }
+
+  /**
+   * Brings the markdown editor up to date with the chapter's scenes. If the
+   * chapter now holds a screenplay scene (restored or moved in), the editor
+   * goes back to rich text instead, without writing the markdown back.
+   */
+  function syncChapterMarkdownSource() {
+    if (markdownEditorMode && activeChapter && chapterHasScreenplayScene(activeChapter.id)) {
+      markdownEditorMode = false;
+      setEditorContent(buildChapterHtml(
+        scenesInChapter(activeChapter.id).map((doc) => doc.content),
+        publishOptions.sceneSeparator
+      ));
+      refreshCounts();
+      return;
+    }
+    setMarkdownSource(chapterMarkdownSource());
+  }
+
   function switchToMarkdownEditor() {
     if (!markdownEditorEnabled || markdownEditorMode) return;
+    if (inChapterMode && chapterHasScreenplayScene(activeChapter?.id)) return;
     if (saveTimer) clearTimeout(saveTimer);
     persistNow();
     const active = documents.find((doc) => doc.id === activeDocumentId);
@@ -3599,6 +3652,8 @@
 
   /** Writes the chapter markdown source back to scene documents. */
   function applyMarkdownSourceToDocs() {
+    // Never through markdown: a screenplay scene's elements would be lost.
+    if (chapterHasScreenplayScene(activeChapter?.id)) return;
     const mdSections = splitChapterMarkdown(markdownSource);
     const parsedSections = mdSections.map((section) => markdownToDocument(section));
     writeChapterSections(
@@ -3615,7 +3670,8 @@
       applyMarkdownSourceToDocs();
       setEditorContent(buildChapterHtml(
         scenesInChapter(activeChapter.id).map((doc) => doc.content),
-        publishOptions.sceneSeparator
+        publishOptions.sceneSeparator,
+        scenesInChapter(activeChapter.id).map((doc) => doc.id)
       ));
     } else {
       const html = applySingleDocumentMarkdown(markdownSource);
@@ -3639,7 +3695,11 @@
     let html = "";
     if (inChapterMode && activeChapter) {
       applyMarkdownSourceToDocs();
-      html = buildChapterHtml(scenesInChapter(activeChapter.id).map((doc) => doc.content), publishOptions.sceneSeparator);
+      html = buildChapterHtml(
+        scenesInChapter(activeChapter.id).map((doc) => doc.content),
+        publishOptions.sceneSeparator,
+        scenesInChapter(activeChapter.id).map((doc) => doc.id)
+      );
     } else {
       html = applySingleDocumentMarkdown(markdownSource);
     }
@@ -4661,7 +4721,8 @@
       if (markdownEditorMode) {
         applyMarkdownSourceToDocs();
       } else {
-        writeChapterSections(splitChapterHtml(cleanHtml(editor.innerHTML)));
+        const cleaned = cleanHtml(editor.innerHTML);
+        writeChapterSections(splitChapterHtml(cleaned), undefined, undefined, chapterSceneIds(cleaned));
       }
       chapters = chapters.map((chapter) => chapter.id === activeChapter.id ? { ...chapter, title } : chapter);
       persistChapters();
@@ -4695,6 +4756,29 @@
     saveState = "Saving…";
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(persistNow, 350);
+  }
+
+  function updateSceneMeta(id: string, meta: DocumentMeta | undefined) {
+    documents = documents.map((doc) => {
+      if (doc.id !== id) return doc;
+      const next = { ...doc };
+      if (meta && Object.keys(meta).length > 0) {
+        next.meta = meta;
+      } else {
+        delete next.meta;
+      }
+      return next;
+    });
+    persist();
+  }
+
+  /** Confirms a detected character for a scene, which is what the graph tile's suggestion chips do. */
+  function confirmSceneCharacter(sceneId: string, pageId: string) {
+    const doc = documents.find((entry) => entry.id === sceneId);
+    if (!doc) return;
+    const characters = doc.meta?.characters ?? [];
+    if (characters.includes(pageId)) return;
+    updateSceneMeta(sceneId, { ...doc.meta, characters: [...characters, pageId] });
   }
 
   const activeComments = $derived.by(() => {
@@ -5202,9 +5286,10 @@
       activeDocumentId = snapshot.documentId;
       setEditorContent(buildChapterHtml(
         scenesInChapter(activeChapter.id).map((doc) => doc.content),
-        publishOptions.sceneSeparator
+        publishOptions.sceneSeparator,
+        scenesInChapter(activeChapter.id).map((doc) => doc.id)
       ));
-      setMarkdownSource(chapterMarkdownSource());
+      syncChapterMarkdownSource();
       scrollToScene(snapshot.documentId);
     } else {
       setEditorContent(restored);
@@ -5258,9 +5343,7 @@
     const scopeIds = new Set(footnoteDocs().map((doc) => doc.id));
     documents = documents.map((doc) => {
       if (!scopeIds.has(doc.id)) return doc;
-      const nextNotes = map.get(doc.id);
-      const { footnotes: _old, ...rest } = doc;
-      return nextNotes && nextNotes.length > 0 ? { ...rest, footnotes: nextNotes } : rest;
+      return withFootnotes(doc, map.get(doc.id));
     });
   }
 
@@ -5270,10 +5353,7 @@
     const scopeIds = new Set(footnoteDocs().map((doc) => doc.id));
     documents = documents.map((doc) => {
       if (!scopeIds.has(doc.id) || !doc.footnotes?.length) return doc;
-      const nextNotes = doc.footnotes.filter((fn) => !drop.has(fn.id));
-      if (nextNotes.length === doc.footnotes.length) return doc;
-      const { footnotes: _old, ...rest } = doc;
-      return nextNotes.length > 0 ? { ...rest, footnotes: nextNotes } : rest;
+      return withFootnotes(doc, doc.footnotes.filter((fn) => !drop.has(fn.id)));
     });
   }
 
@@ -5286,12 +5366,28 @@
     return editor ? encodeSelection(editor) : null;
   }
 
+  /**
+   * The rich editor's content is now newer than any Markdown source of the
+   * scene (or the chapter's scenes), so the source is dropped; otherwise the
+   * open sync folder or the Markdown editor would bring the old text back.
+   */
+  function dropEditedMarkdownSource() {
+    const chapterId = inChapterMode ? activeChapter?.id : undefined;
+    documents = documents.map((doc) => {
+      if (doc.markdownSource === undefined) return doc;
+      if (chapterId ? doc.chapterId !== chapterId : doc.id !== activeDocumentId) return doc;
+      const { markdownSource: _markdownSource, ...withoutMarkdownSource } = doc;
+      return withoutMarkdownSource;
+    });
+  }
+
   function finishProgrammaticBodyEdit(before: CaretSelection, caretMoved = true) {
     if (!editor) return;
     renumberFootnoteMarkers(editor);
     const cleaned = cleanHtml(editor.innerHTML);
     liveEditorHtml = cleaned;
     knownEditorFootnoteIds = new Set(extractFootnoteIds(cleaned));
+    dropEditedMarkdownSource();
     pendingEdit = {
       kind: "other",
       caretMoved,
@@ -5434,7 +5530,7 @@
       const nextNotes = hasEntry
         ? updateFootnote(existing, id, clean)
         : [...existing, { id, html: clean }];
-      return { ...doc, footnotes: nextNotes };
+      return withFootnotes(doc, nextNotes);
     });
     if (footnotePopover && footnotePopover.id === id) {
       footnotePopover.dirty = true;
@@ -5469,7 +5565,7 @@
 
     const added = addFootnote(targetDoc.footnotes, "");
     documents = documents.map((doc) => doc.id === targetDoc.id
-      ? { ...doc, footnotes: added.footnotes }
+      ? withFootnotes(doc, added.footnotes)
       : doc);
 
     const template = document.createElement("div");
@@ -5525,9 +5621,7 @@
     const scopeIds = new Set(scope.docs.map((doc) => doc.id));
     documents = documents.map((doc) => {
       if (!scopeIds.has(doc.id) || !doc.footnotes?.length) return doc;
-      const pruned = pruneOrphanFootnotes(scope.html, doc.footnotes);
-      const { footnotes: _old, ...rest } = doc;
-      return pruned.length > 0 ? { ...rest, footnotes: pruned } : rest;
+      return withFootnotes(doc, pruneOrphanFootnotes(scope.html, doc.footnotes));
     });
     finishProgrammaticBodyEdit(before, true);
   }
@@ -5795,37 +5889,60 @@
   }
 
   /**
-   * Writes chapter sections back to scene documents in order. Surplus
-   * sections fold into the last scene; scenes left without a section are
-   * emptied and moved to Trash; trashed scenes regaining a section are
+   * Writes chapter sections back to scene documents. With the scene ids the
+   * dividers carry, each section goes to its own scene; otherwise in order.
+   * Surplus sections fold into the last scene; scenes left without a section
+   * are emptied and moved to Trash; trashed scenes regaining a section are
    * restored (undo of a merge).
    */
   function writeChapterSections(
     sections: string[],
     markdownSections?: string[],
-    footnoteSections?: FootnoteDef[][]
+    footnoteSections?: FootnoteDef[][],
+    sceneIds?: string[]
   ) {
     const chapterId = activeChapter?.id;
     if (!chapterId) return;
-    writeChapterSectionsFor(chapterId, sections, markdownSections, footnoteSections);
+    writeChapterSectionsFor(chapterId, sections, markdownSections, footnoteSections, sceneIds);
   }
 
   function writeChapterSectionsFor(
     chapterId: string,
     sections: string[],
     markdownSections?: string[],
-    footnoteSections?: FootnoteDef[][]
+    footnoteSections?: FootnoteDef[][],
+    sceneIds?: string[]
   ) {
     const live = documents.filter((doc) => doc.chapterId === chapterId && !doc.trashed);
     if (live.length === 0) return;
     const trashed = documents.filter((doc) => doc.chapterId === chapterId && doc.trashed);
+    const byIds = chapterSectionTargets(
+      live.map((doc) => doc.id),
+      trashed.map((doc) => doc.id),
+      sceneIds,
+      sections.length
+    );
     const revived: DocumentData[] = [];
-    for (let index = live.length; index < sections.length; index++) {
-      const donor = trashed.find((doc) => !revived.some((entry) => entry.id === doc.id));
-      if (!donor) break;
-      revived.push(donor);
+    if (byIds) {
+      for (const id of byIds) {
+        const donor = trashed.find((doc) => doc.id === id);
+        if (donor) revived.push(donor);
+      }
+    } else {
+      for (let index = live.length; index < sections.length; index++) {
+        const donor = trashed.find((doc) => !revived.some((entry) => entry.id === doc.id));
+        if (!donor) break;
+        revived.push(donor);
+      }
     }
-    const targets = [...live, ...revived];
+    // By ids, the scenes no section names come last: like surplus scenes, they
+    // are trashed below and their footnotes follow their markers.
+    const targets = byIds
+      ? [
+        ...byIds.map((id) => [...live, ...revived].find((doc) => doc.id === id) as DocumentData),
+        ...live.filter((doc) => !byIds.includes(doc.id))
+      ]
+      : [...live, ...revived];
     const merged = [...sections];
     const mergedMarkdown = markdownSections ? [...markdownSections] : undefined;
     const mergedFootnotes = footnoteSections ? footnoteSections.map((list) => [...list]) : undefined;
@@ -5916,6 +6033,19 @@
       }
       return doc;
     });
+    if (byIds) {
+      // A scene cut and pasted elsewhere in the chapter keeps its new place:
+      // the chapter's scenes take the dividers' order, in the slots they held.
+      const slots = documents.flatMap((doc, index) => (byIds.includes(doc.id) ? [index] : []));
+      const ordered = byIds.map((id) => documents.find((doc) => doc.id === id) as DocumentData);
+      if (slots.some((slot, index) => documents[slot].id !== ordered[index].id)) {
+        const next = [...documents];
+        slots.forEach((slot, index) => {
+          next[slot] = ordered[index];
+        });
+        documents = next;
+      }
+    }
   }
 
   function scrollToScene(docId: string) {
@@ -6268,7 +6398,7 @@
     documents = [...documents.slice(0, at), next, ...documents.slice(at)];
     activeDocumentId = next.id;
     const dividerTemplate = document.createElement("div");
-    dividerTemplate.innerHTML = sceneBreakHtml(publishOptions.sceneSeparator);
+    dividerTemplate.innerHTML = sceneBreakHtml(publishOptions.sceneSeparator, next.id);
     const divider = dividerTemplate.firstElementChild as HTMLElement;
     (block as HTMLElement).replaceWith(divider);
     let target = significantSibling(divider, "next");
@@ -6365,12 +6495,15 @@
     if (!chapter) return false;
     activeDocumentId = anchorId;
     title = chapter.title;
+    // Leave the markdown editor without writing anything back (see chapterHasScreenplayScene).
+    if (markdownEditorMode && chapterHasScreenplayScene(chapter.id)) markdownEditorMode = false;
     clearRichTextFade();
     setEditorContent(buildChapterHtml(
       scenesInChapter(chapter.id).map((doc) => doc.content),
-      publishOptions.sceneSeparator
+      publishOptions.sceneSeparator,
+      scenesInChapter(chapter.id).map((doc) => doc.id)
     ));
-    setMarkdownSource(chapterMarkdownSource());
+    syncChapterMarkdownSource();
     refreshCounts();
     lastEditorWordCount = wordCount;
     scrollToScene(anchorId);
@@ -6402,6 +6535,13 @@
     if (compactChapterLayout) {
       void tick().then(() => editor?.focus());
     }
+  }
+
+  /** Opens a wiki page's character card in the network view. */
+  function openCharacterCard(id: string) {
+    closeSidebarDrawers(false);
+    setWorkspaceView("network");
+    openCardFor = id;
   }
 
   /** Opens project search, seeding the query with the current selection when there is one. */
@@ -6483,9 +6623,10 @@
       if (inChapterMode && activeChapter) {
         setEditorContent(buildChapterHtml(
           scenesInChapter(activeChapter.id).map((doc) => doc.content),
-          publishOptions.sceneSeparator
+          publishOptions.sceneSeparator,
+          scenesInChapter(activeChapter.id).map((doc) => doc.id)
         ));
-        setMarkdownSource(chapterMarkdownSource());
+        syncChapterMarkdownSource();
       } else {
         const current = nextDocuments.find((doc) => doc.id === activeDocumentId);
         if (!current) {
@@ -7627,6 +7768,7 @@
       .filter((doc) => doc.space === "Wiki" && !doc.trashed)
       .map((doc) => ({ value: docTarget(doc.id), label: doc.title || "Untitled" }));
     if (wikiPages.length > 0) groups.push({ label: "Wiki pages", options: wikiPages });
+    groups.push({ label: "Graph", options: [{ value: graphTarget("scene"), label: "Characters graph" }] });
     if (splitFiles.length > 0) {
       groups.push({
         label: "Wiki files",
@@ -7639,6 +7781,10 @@
   // Panes keep showing something that was deleted or trashed in the meantime.
   $effect(() => {
     const valid = new Set(splitGroups.flatMap((group) => group.options.map((option) => option.value)));
+    // Page-centred graph tiles come from the network view and the character sheet, not the picker.
+    for (const doc of documents) {
+      if (doc.space === "Wiki" && !doc.trashed) valid.add(graphTarget("page", doc.id));
+    }
     if (splitPanes.some((pane) => pane.target && !valid.has(pane.target))) {
       splitPanes = pruneSplitTargets(splitPanes, valid);
     }
@@ -7667,7 +7813,8 @@
     const doc = documents.find((entry) => entry.id === id);
     if (patch.content !== undefined && doc?.chapterId
       && chapters.some((chapter) => chapter.id === doc.chapterId)) {
-      writeChapterSectionsFor(doc.chapterId, splitChapterHtml(cleanHtml(patch.content)));
+      const cleaned = cleanHtml(patch.content);
+      writeChapterSectionsFor(doc.chapterId, splitChapterHtml(cleaned), undefined, undefined, chapterSceneIds(cleaned));
       persist();
       return;
     }
@@ -8009,12 +8156,13 @@
   function refreshChapterView(scrollToId?: string | null) {
     if (!inChapterMode || !activeChapter) return;
     if (markdownEditorMode) {
-      setMarkdownSource(chapterMarkdownSource());
+      syncChapterMarkdownSource();
       return;
     }
     setEditorContent(buildChapterHtml(
       scenesInChapter(activeChapter.id).map((doc) => doc.content),
-      publishOptions.sceneSeparator
+      publishOptions.sceneSeparator,
+      scenesInChapter(activeChapter.id).map((doc) => doc.id)
     ));
     refreshCounts();
     if (scrollToId) scrollToScene(scrollToId);
@@ -8043,8 +8191,13 @@
       node.remove();
       node = next;
     }
+    // The section's divider goes too (the one before it, or after the first),
+    // so the scenes after it keep their own sections.
+    const divider = index > 0 ? breaks[index - 1] : end;
+    const after: Node | null = divider === end ? end?.nextSibling ?? null : end;
+    divider?.remove();
     if (caretInside && selection) {
-      let host: Node | null = end;
+      let host: Node | null = after;
       while (host && ((host.nodeType === Node.TEXT_NODE && !(host.textContent ?? "").trim())
         || isSceneBreakElement(host))) {
         host = host.nextSibling;
@@ -8434,7 +8587,7 @@
         refreshCounts();
       }
     } else if (inActiveChapter && markdownEditorMode) {
-      setMarkdownSource(chapterMarkdownSource());
+      syncChapterMarkdownSource();
     }
     persist();
   }
@@ -8715,13 +8868,7 @@
       recordFieldEdit(editor, encodeCurrentBodyUndo(cleaned), encodeSelection(editor));
     }
     const previousWordCount = lastEditorWordCount;
-    const chapterId = inChapterMode ? activeChapter?.id : undefined;
-    documents = documents.map((doc) => {
-      if (doc.markdownSource === undefined) return doc;
-      if (chapterId ? doc.chapterId !== chapterId : doc.id !== activeDocumentId) return doc;
-      const { markdownSource: _markdownSource, ...withoutMarkdownSource } = doc;
-      return withoutMarkdownSource;
-    });
+    dropEditedMarkdownSource();
     refreshCounts();
     trackActivity(wordCount - previousWordCount);
     lastEditorWordCount = wordCount;
@@ -10470,6 +10617,7 @@
           <button type="button" role="menuitem" class="danger" onclick={() => { removeResearchFolder(ctxFolder); closeContextMenu(); }}>Remove folder</button>
         {:else if ctx.kind === "wiki-doc" && ctxDoc}
           <button type="button" role="menuitem" onclick={() => { openSidebarDocument(ctxDoc.id); closeContextMenu(); }}>Open page</button>
+          <button type="button" role="menuitem" onclick={() => { openCharacterCard(ctxDoc.id); closeContextMenu(); }}>Open character card</button>
           <button type="button" role="menuitem" onclick={() => { openBesideTarget(docTarget(ctxDoc.id)); closeContextMenu(); }}>Open beside</button>
           {#if researchFolderChoices.length > 0}
             <button type="button" role="menuitem" aria-expanded={contextMenuMoveOpen} onclick={() => (contextMenuMoveOpen = !contextMenuMoveOpen)}>Move to folder…</button>
@@ -10580,6 +10728,7 @@
           {#if timelineEnabled}
           <button class="workspace-mode" class:active={workspaceView === "timeline"} role="tab" aria-selected={workspaceView === "timeline"} onclick={() => setWorkspaceView("timeline")}>Timeline</button>
           {/if}
+          <button class="workspace-mode" class:active={workspaceView === "network"} role="tab" aria-selected={workspaceView === "network"} onclick={() => setWorkspaceView("network")}>Network</button>
           <button class="workspace-mode" class:active={workspaceView === "publish"} role="tab" aria-selected={workspaceView === "publish"} onclick={openPublishView}>Publish</button>
         </div>
         {#if workspaceView === "storyboard"}
@@ -10701,6 +10850,30 @@
           maxlength="120"
         />
 
+        {#if shouldShowStoryData(activeDocument)}
+          <StoryDataPanel
+            meta={activeDocument.meta}
+            content={activeDocument.content}
+            pages={documents}
+            folders={researchFolders}
+            onchange={(meta) => updateSceneMeta(activeDocumentId, meta)}
+          />
+        {/if}
+
+        {#if activeDocument && showCardInEditor(activeDocument)}
+          <CharacterSheet
+            document={activeDocument}
+            pages={documents}
+            folders={researchFolders}
+            chapters={liveChapters}
+            projectTemplates={projectSheetTemplates}
+            onchange={(meta) => updateSceneMeta(activeDocumentId, meta)}
+            onsavetemplates={(next) => (projectSheetTemplates = next)}
+            onOpenScene={(id) => openDocument(id)}
+            onOpenGraphBeside={(id) => openBesideTarget(graphTarget("page", id))}
+          />
+        {/if}
+
         <div class="editor-tools">
         {#if screenplayActive && !markdownEditorMode}
           <div class="screenplay-bar-row">
@@ -10752,7 +10925,15 @@
           <button class="tool-button" aria-label="Insert diagram" title="Insert diagram" onpointerdown={(event) => event.preventDefault()} onclick={() => openRichDialog("diagram")}><Workflow size={16} aria-hidden="true" /></button>
           <button class="tool-button" aria-label="Insert calculation" title="Insert calculation" onpointerdown={(event) => event.preventDefault()} onclick={() => openRichDialog("calc")}><Calculator size={16} aria-hidden="true" /></button>
           {#if markdownEditorEnabled}
-            <button class="tool-button tool-button-wide" aria-label="Markdown editor" title="Markdown editor" onpointerdown={(event) => event.preventDefault()} onclick={toggleEditorMode}>MD</button>
+            {@const screenplayChapter = inChapterMode && chapterHasScreenplayScene(activeChapter?.id)}
+            <button
+              class="tool-button tool-button-wide"
+              aria-label="Markdown editor"
+              title={screenplayChapter ? "Not available in a chapter with screenplay scenes" : "Markdown editor"}
+              disabled={screenplayChapter}
+              onpointerdown={(event) => event.preventDefault()}
+              onclick={toggleEditorMode}
+            >MD</button>
           {/if}
         </div>
         {/if}
@@ -11065,6 +11246,8 @@
             groups={splitGroups}
             {documents}
             {chapters}
+            folders={researchFolders}
+            activeDocumentId={activeDocumentId}
             sceneSeparator={publishOptions.sceneSeparator}
             files={splitFiles}
             isActiveDocument={pane.target === docTarget(activeDocumentId)}
@@ -11082,6 +11265,9 @@
             onEditTitle={(id, value) => updateTileDocument(id, { title: value })}
             onEditChapterTitle={(chapterId, value) => updateTileChapterTitle(chapterId, value)}
             onEditContent={(id, html) => updateTileDocument(id, { content: html })}
+            onConfirmCharacter={(sceneId, pageId) => confirmSceneCharacter(sceneId, pageId)}
+            onOpenPage={(id) => openBesideTarget(docTarget(id))}
+            onOpenPageInEditor={openSidebarDocument}
             onClose={() => { splitPanes = removeSplitPane(splitPanes, pane.id); }}
           />
         </div>
@@ -11299,6 +11485,25 @@
             onRemove={removeTimelineNode}
             onMove={moveTimelineNode}
             onReorder={reorderTimelineNodes}
+          />
+        {/if}
+        {#if workspaceView === "network"}
+          <NetworkView
+            {documents}
+            chapters={liveChapters}
+            folders={researchFolders}
+            onChange={(next) => {
+              documents = next;
+              persistProjectCollection();
+            }}
+            onOpenPage={openSidebarDocument}
+            onOpenGraphBeside={(id) => openBesideTarget(graphTarget("page", id))}
+            projectTemplates={projectSheetTemplates}
+            onsavetemplates={(next) => (projectSheetTemplates = next)}
+            openCardFor={openCardFor}
+            onCardOpened={() => (openCardFor = null)}
+            dismissedSuggestions={dismissedSuggestions}
+            onDismissSuggestion={dismissRelationSuggestion}
           />
         {/if}
         {#if workspaceView === "publish"}

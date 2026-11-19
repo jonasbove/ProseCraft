@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { citeMarkerHtml } from "$lib/citations/cite-marker";
+import { updateFootnote, withFootnotes } from "$lib/footnotes";
 import { createStoredProject, projectsHaveSameContent, stampProject } from "../schema";
 import type { ProjectData, StoredProject } from "../types";
+import type { DocumentMeta } from "../../story-meta";
 import { BUNDLE_FILE, OPEN_MARKER_FILE, VAULT_FILE } from "./files";
 import { FolderSyncProvider } from "./folder-provider";
 import { EncryptedFileSyncProvider } from "./bundle-provider";
@@ -211,6 +213,36 @@ describe("open-folder sync", () => {
       .toMatchObject({ trashed: true, trashedWithChapterId: "chapter-1" });
   });
 
+  it("round-trips document meta, sheet templates, and dismissed suggestions", async () => {
+    const fs = new MemoryFileSystem();
+    const project = storedProject();
+    const meta: DocumentMeta = {
+      kind: "character",
+      aliases: ["Mara Voss"],
+      tags: ["crew"],
+      sheet: { secret: "Mutineer" },
+      relations: [{ id: "relation-1", to: "doc-1", type: "friend", tension: 3 }]
+    };
+    project.project.documents = project.project.documents.map((document) =>
+      document.id === "doc-2" ? { ...document, meta } : document
+    );
+    project.project.sheetTemplates = [
+      { id: "template-1", name: "Thriller", fields: [{ id: "secret", label: "Secret", type: "longtext" }] }
+    ];
+    project.project.dismissedSuggestions = ["doc-1:doc-2"];
+
+    await new OpenFolderSyncProvider(fs).sync("", [project], {}, 1_000, "device-a");
+
+    const markdown = await fs.readText("projects/project-1/documents/doc-2.md");
+    expect(markdown).toContain('meta: {"kind":"character"');
+
+    const reopened = await new OpenFolderSyncProvider(fs).connect("");
+    const stored = reopened.projects[0].project;
+    expect(stored.documents.find((document) => document.id === "doc-2")?.meta).toEqual(meta);
+    expect(stored.sheetTemplates).toEqual(project.project.sheetTemplates);
+    expect(stored.dismissedSuggestions).toEqual(["doc-1:doc-2"]);
+  });
+
   it("round-trips project kind in project.json", async () => {
     const fs = new MemoryFileSystem();
     const screenplay = createStoredProject(
@@ -356,6 +388,42 @@ describe("open-folder sync", () => {
         footnotes[0],
         { id: "fn-2", html: "Edited <em>note</em>." }
       ]);
+  });
+
+  it("keeps a footnote edited in the app after an open folder sync", async () => {
+    const fs = new MemoryFileSystem();
+    const fixture = projectFixture();
+    const withFootnote: ProjectData = {
+      ...fixture,
+      documents: fixture.documents.map((document) => document.id === "doc-1"
+        ? {
+          ...document,
+          content: `<p>Text<sup class="footnote-ref" data-footnote-id="fn-1" contenteditable="false"></sup>.</p>`,
+          footnotes: [{ id: "fn-1", html: "Old note." }]
+        }
+        : document)
+    };
+    const first = await new OpenFolderSyncProvider(fs)
+      .sync("", [createStoredProject(withFootnote, "device-a", 1_000)], {}, 1_000, "device-a");
+    // The synced scene now carries its Markdown, footnote definition included.
+    expect(first.projects[0].project.documents[0].markdownSource).toContain("[^fn-1]: Old note.");
+
+    // Editing the footnote's text, as the footnote popover does.
+    const edited = stampProject(first.projects[0], {
+      ...first.projects[0].project,
+      documents: first.projects[0].project.documents.map((doc) => doc.id === "doc-1"
+        ? withFootnotes(doc, updateFootnote(doc.footnotes, "fn-1", "New note."))
+        : doc)
+    }, "device-a", 2_000);
+    const second = await new OpenFolderSyncProvider(fs)
+      .sync("", [edited], first.lastSynced, 2_000, "device-a");
+
+    const expected = [{ id: "fn-1", html: "New note." }];
+    expect(second.projects[0].project.documents[0].footnotes).toEqual(expected);
+    expect(await fs.readText("projects/project-1/documents/doc-1.md")).toContain("[^fn-1]: New note.");
+    const reopened = await new OpenFolderSyncProvider(fs).connect("");
+    expect(reopened.projects[0].project.documents.find((doc) => doc.id === "doc-1")?.footnotes)
+      .toEqual(expected);
   });
 
   it("round-trips citations in project.json through the open folder layout", async () => {
