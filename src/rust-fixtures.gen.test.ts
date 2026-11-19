@@ -2055,3 +2055,258 @@ it.skipIf(!OUT)("writes calculation fixtures", async () => {
   });
   write("calc.json", { cases });
 });
+
+it.skipIf(!OUT)("writes network fixtures", async () => {
+  const meta = await import("$lib/story-meta");
+  const yaml = await import("$lib/story-yaml");
+  const rel = await import("$lib/relations");
+  const model = await import("$lib/relation-graph-model");
+  const layout = await import("$lib/graph-layout");
+  const connect = await import("$lib/graph-connect");
+  const tile = await import("$lib/graph-tile");
+  const strip = await import("$lib/appearance-strip");
+  const timeline = await import("$lib/network-timeline");
+  const accept = await import("$lib/suggestion-accept");
+  const sheets = await import("$lib/sheet-templates");
+  const plain = (value: unknown) => (value === undefined ? null : JSON.parse(JSON.stringify(value)));
+
+  const long = "x".repeat(130);
+  const normalizeInputs: unknown[] = [
+    null, "text", [], {}, { kind: "dragon" },
+    { kind: "character", aliases: ["  Mara  ", "", 3, long], tags: ["a", " b "], characters: ["p1", " ", "p2"] },
+    { place: "  The Harbor ", storyDate: "  1888-03-01 ", sheetTemplate: "  thriller ", sheet: { role: "Lead", age: 41, "": "x", "2": "two", "10": "ten" } },
+    { relations: [
+      { id: "r1", to: "p2", type: "friend", tension: 3.5, label: "  old friends ", from: "c1", until: "c3", note: " n " },
+      { id: "r2", to: "p3", type: "nemesis" },
+      { id: " ", to: "p3", type: "rival" },
+      { id: "r3", to: "p3", type: "rival", tension: -4 },
+      { id: "r4", to: "p4", type: "love", tension: 99, label: "" },
+      "bad"
+    ] },
+    { future: { nested: [1, 2] }, kind: "place", other: null, "7": "seven" },
+    { aliases: Array.from({ length: 30 }, (_, i) => `alias ${i}`), tags: Array.from({ length: 60 }, (_, i) => `t${i}`) },
+    { sheet: { emoji: "😀".repeat(5000) } }
+  ];
+  const normalize = normalizeInputs.map((input) => ({ input, output: plain(meta.normalizeMeta(input)) }));
+
+  const storyTexts = [
+    "kind: \"character\"\naliases: [\"Mara\"]\n# comment\n\ntags: [\"crew\"]",
+    "characters: [\"p1\",\"p2\"]\nplace: The Harbor\nstoryDate: 1888\nextra: {\"a\":1}",
+    "no colon here",
+    ": value",
+    "bad key: 1",
+    "kind:",
+    "relations: [oops",
+    "kind: \"dragon\"",
+    "\r\nkind: \"item\"\r\n"
+  ];
+  const story = storyTexts.map((text) => {
+    const parsed = yaml.parseStoryMeta(text);
+    return parsed.ok ? { text, meta: plain(parsed.meta), serialized: yaml.serializeStoryMeta(parsed.meta) } : { text, error: parsed.error };
+  });
+
+  const folders = [
+    { id: "f-chars", title: " Characters " },
+    { id: "f-places", title: "places" },
+    { id: "f-orgs", title: "Organizations" },
+    { id: "f-misc", title: "Misc" }
+  ];
+  const chapters = ["c1", "c2", "c3", "c4"].map((id) => ({ id, title: id.toUpperCase() }));
+  const documents = [
+    { id: "mara", title: "Mara Voss", space: "Wiki", folderId: "f-chars", content: "", meta: { aliases: ["Captain"], relations: [
+      { id: "r1", to: "jonah", type: "friend", tension: 3, from: "c2", until: "c3" },
+      { id: "r2", to: "harbor", type: "other", label: "home" },
+      { id: "r3", to: "ghost", type: "rival" }
+    ] } },
+    { id: "jonah", title: "Jonah", space: "Wiki", folderId: "f-chars", content: "", meta: { relations: [{ id: "r4", to: "mara", type: "rival", label: "  " }] } },
+    { id: "harbor", title: "The Harbor", space: "Wiki", folderId: "f-places", content: "" },
+    { id: "guild", title: "Guild", space: "Wiki", content: "", meta: { kind: "organisation", relations: [{ id: "r5", to: "mara", type: "employer", from: "gone" }] } },
+    { id: "eli", title: "Eli", space: "Wiki", folderId: "f-orgs", content: "", meta: { kind: "character" } },
+    { id: "ghost", title: "Ghost", space: "Wiki", folderId: "f-chars", trashed: true, content: "" },
+    { id: "box", title: "Box", space: "Wiki", folderId: "f-misc", content: "" },
+    { id: "s1", title: "Arrival", chapterId: "c1", content: "<p>Mara Voss walked to the harbor. Jonah waited.</p>" },
+    { id: "s2", title: "Talk", chapterId: "c1", content: "<p>The Captain spoke with jonah, near Eli.</p>", meta: { characters: ["eli", "box", "missing"] } },
+    { id: "s3", title: "Storm", chapterId: "c2", content: "<p>MaraVoss? No. Mara Voss and Jonah and The Harbor and Guild.</p>" },
+    { id: "s4", title: "Trashed", chapterId: "c2", trashed: true, content: "<p>Jonah</p>" },
+    { id: "s5", title: "Quiet", chapterId: "c3", content: "<p>Nobody.</p>", meta: { characters: ["mara"] } },
+    { id: "s6", title: "End", chapterId: "c4", content: "<p>Jonah, Mara Voss, Eli and Guild meet.</p>" },
+    { id: "s7", title: "Loose", content: "<p>Jonah</p>" },
+    { id: "s8", title: "Again", chapterId: "c1", content: "<p>Jonah and Mara Voss and Eli.</p>" }
+  ];
+  const appearanceMap = rel.appearances(documents as never, chapters as never, folders as never);
+  const appearances = [...appearanceMap.values()];
+  const relations = rel.relationsOf(documents as never);
+  const pairs = rel.coAppearanceCounts(appearanceMap);
+  const suggestions = {
+    defaults: rel.suggestRelations(appearanceMap, relations, []),
+    one: rel.suggestRelations(appearanceMap, relations, ["eli|jonah"], 1)
+  };
+  const kinds = documents.map((doc) => rel.pageKind(doc as never, folders as never));
+  const active = relations.map(({ relation }) => chapters.map((c) => rel.relationActiveAt(relation, c.id, chapters as never)).concat([rel.relationActiveAt(relation, "nope", chapters as never)]));
+  const boundaries = timeline.relationBoundaryIndexes(relations, chapters as never);
+  const sceneChapters = new Map(documents.filter((d) => d.chapterId).map((d) => [d.id, d.chapterId!]));
+  const pages = documents.filter((d) => d.space === "Wiki" && !d.trashed).map((d) => ({ id: d.id, title: d.title, kind: rel.pageKind(d as never, folders as never) }));
+  const graphCases = [
+    { chapterId: null, exact: false, kinds: null },
+    { chapterId: "c1", exact: true, kinds: null },
+    { chapterId: "c1", exact: false, kinds: null },
+    { chapterId: "c2", exact: true, kinds: null },
+    { chapterId: "c3", exact: false, kinds: null },
+    { chapterId: "nope", exact: false, kinds: null },
+    { chapterId: null, exact: false, kinds: ["character"] }
+  ].map((c) => ({ ...c, model: model.buildRelationGraph({
+    pages, relations, appearances: appearanceMap, suggestions: rel.coAppearanceCounts(appearanceMap), chapters: chapters as never,
+    chapterId: c.chapterId, sceneChapters: c.exact ? sceneChapters : undefined, kinds: (c.kinds ?? undefined) as never
+  }) }));
+  const tiles = [
+    ...documents.map((d) => ({ sceneId: d.id, pageId: null })),
+    { sceneId: null, pageId: "mara" }, { sceneId: null, pageId: "harbor" }, { sceneId: "s1", pageId: "ghost" }, { sceneId: null, pageId: null }
+  ].map((c) => ({ ...c, model: tile.graphTileModel({ documents: documents as never, chapters: chapters as never, folders: folders as never, sceneId: c.sceneId, pageId: c.pageId }) }));
+  const bars = [...pages.map((p) => p.id), "nobody"].map((id) => ({ id, bars: strip.chapterBars(appearanceMap.get(id), chapters as never, documents as never) }));
+
+  let counter = 0;
+  const nextId = () => `new-${++counter}`;
+  let docs = rel.addRelation(documents as never, "jonah", { to: "harbor", type: "love", label: "x" }, nextId);
+  const added = plain(docs.find((d) => d.id === "jonah"));
+  docs = rel.updateRelation(docs, "mara", "r1", { tension: 5, label: "best", id: "hijack" } as never);
+  const updated = plain(docs.find((d) => d.id === "mara"));
+  docs = rel.removeRelation(docs, "jonah", "r4");
+  docs = rel.removeRelation(docs, "jonah", "new-1");
+  const removed = plain(docs.find((d) => d.id === "jonah"));
+  const mutations = { added, updated, removed };
+
+  const initials = ["", "   ", "mara", "Mara Voss", " ada  lovelace  byron ", "é", "😀x", "x😀"].map((label) => ({ label, initials: model.initialsOf(label) }));
+  const graph = graphCases[0].model;
+  const queries = ["", "  ", "MA", "voss", "zzz"].map((q) => ({ q, ids: model.matchingNodeIds(graph.nodes, q) }));
+  const neighbours = ["mara", "jonah", "box"].map((id) => ({ id, neighbours: [...model.neighbourIds(graph.edges, id)].sort(), incident: [...model.incidentEdgeIds(graph.edges, id)].sort() }));
+  const bounds = [[], [{ x: 1, y: 2 }], [{ x: -3, y: 4 }, { x: 5, y: -6 }, { x: 0, y: 0 }]].map((points) => ({ points, bounds: model.graphBounds(points) }));
+
+  const cn = [{ id: "a", x: 0, y: 0 }, { id: "b", x: 10, y: 0 }, { id: "c", x: 12, y: 0 }];
+  const cr = [{ from: "a", to: "b" }];
+  const connects = [
+    { from: "a", point: { x: 11, y: 0 }, radius: 5 },
+    { from: "a", point: { x: 9, y: 0 }, radius: 5 },
+    { from: "b", point: { x: 1, y: 0 }, radius: 5 },
+    { from: "a", point: { x: 1, y: 0 }, radius: 5 },
+    { from: "a", point: { x: 50, y: 0 }, radius: 5 }
+  ].map((c) => ({ ...c, target: connect.connectionTarget(cn, cr, c.from, c.point, c.radius), at: connect.nodeAtPoint(cn, c.point, c.radius) }));
+  const world = connect.screenToWorld({ x: 100, y: 50 }, { scale: 2, translate: { x: 10, y: -10 } });
+
+  const pair = { a: "jonah", b: "mara", key: "jonah|mara", count: 3 };
+  const accepted = [
+    { type: "friend", label: "  pals ", direction: "a-to-b" },
+    { type: "rival", label: "   ", direction: "b-to-a" }
+  ].map((choice) => ({ choice, result: accept.relationFromSuggestion(pair, choice as never) }));
+
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `n${i}` }));
+  const chain = (n: number) => Array.from({ length: n - 1 }, (_, i) => ({ from: `n${i}`, to: `n${i + 1}` }));
+  const layoutCases: { name: string; nodes: unknown[]; edges: unknown[]; options?: Record<string, unknown> }[] = [
+    { name: "empty", nodes: [], edges: [] },
+    { name: "single", nodes: ids(1), edges: [] },
+    { name: "pair", nodes: ids(2), edges: chain(2) },
+    { name: "chain", nodes: ids(6), edges: chain(6) },
+    { name: "components", nodes: ids(9), edges: [...chain(4), { from: "n5", to: "n6" }, { from: "n6", to: "n5" }, { from: "n7", to: "n7" }, { from: "n0", to: "zz" }] },
+    { name: "duplicates", nodes: [{ id: "a" }, { id: "a" }, { id: "" }, { id: "b" }], edges: [{ from: "a", to: "b", weight: 100 }] },
+    { name: "weights", nodes: ids(4), edges: [{ from: "n0", to: "n1", weight: 0 }, { from: "n1", to: "n2", weight: Number.NaN }, { from: "n2", to: "n3", weight: 3 }] },
+    { name: "options", nodes: ids(5), edges: chain(5), options: { width: 300, height: 200, seed: 42, iterations: 12.4, minDistance: 60 } },
+    { name: "badOptions", nodes: ids(3), edges: chain(3), options: { width: -1, height: Number.NaN, iterations: 0, minDistance: 0, seed: 7.9 } },
+    { name: "previous", nodes: ids(5), edges: chain(5), options: { previous: { n0: { x: 100, y: 100 }, n1: { x: 140, y: 90 }, n9: { x: 0, y: 0 } } } },
+    { name: "mixed", nodes: ids(6), edges: [{ from: "n0", to: "n1" }, { from: "n3", to: "n4" }], options: { previous: { n0: { x: -50, y: 20 }, n1: { x: 10, y: 20 } } } },
+    { name: "pinned", nodes: [{ id: "n0", pinned: true }, { id: "n1", x: 5, y: 5, pinned: true }, { id: "n2", pinned: true }, { id: "n3" }], edges: chain(4), options: { previous: { n0: { x: 0, y: 0 } } } },
+    { name: "stacked", nodes: [{ id: "a", x: 0, y: 0 }, { id: "b", x: 0, y: 0 }, { id: "c", x: 0, y: 0 }], edges: [] },
+    { name: "big", nodes: ids(30), edges: [...chain(20), { from: "n0", to: "n10" }, { from: "n21", to: "n22" }, { from: "n25", to: "n29" }] }
+  ];
+  const layouts = layoutCases.map((c) => ({ ...c, result: layout.layoutGraph(c.nodes as never, c.edges as never, c.options as never) }));
+  const fits = [
+    { positions: {}, viewport: { width: 400, height: 300 } },
+    { positions: { a: { x: 5, y: 5 } }, viewport: { width: 400, height: 300 } },
+    { positions: { a: { x: 0, y: 0 }, b: { x: 100, y: 0 } }, viewport: { width: 400, height: 300 }, padding: 10 },
+    { positions: { a: { x: 0, y: 0 }, b: { x: 1000, y: 2000 } }, viewport: { width: 400, height: 300 } },
+    { positions: { a: { x: 0, y: 0 }, b: { x: 1, y: 1 } }, viewport: { width: 0, height: -5 }, padding: Number.NaN },
+    { positions: layouts[3].result, viewport: { width: 640, height: 480 }, padding: 500 }
+  ].map((c) => ({ ...c, view: layout.fitView(c.positions, c.viewport, c.padding) }));
+  const clusterNodes = [{ id: "a", g: "b" }, { id: "b", g: "a" }, { id: "c", g: "b" }, { id: "d", g: "" }, { id: "e", g: "c" }, { id: "f", g: "B" }];
+  const clusters = [
+    { nodes: clusterNodes, options: {} },
+    { nodes: clusterNodes.slice(0, 1), options: {} },
+    { nodes: clusterNodes, options: { radius: 50, spacing: 10 } },
+    { nodes: [{ id: "x", g: "" }], options: {} }
+  ].map((c) => ({ ...c, result: layout.clusterByKey(c.nodes, (n) => n.g, c.options) }));
+
+  const sheetMeta = { kind: "character", sheet: { secret: "s", custom: "c", role: "Lead", "3": "three" } };
+  const applied = sheets.allTemplates({ sheetTemplates: [{ id: "mine", name: "Mine", fields: [{ id: "custom", label: "Custom", type: "text" }] }] })
+    .map((t) => ({ id: t.id, result: plain(sheets.applyTemplate(sheetMeta as never, t)) }))
+    .concat([{ id: "none", result: plain(sheets.applyTemplate(undefined, sheets.BLANK)) }]);
+  const setValues = [
+    [undefined, "role", "Lead"], [{ sheet: { role: "x" } }, "role", ""], [{ kind: "item", sheet: { role: "x" } }, "role", ""],
+    [{ sheet: { a: "1" } }, "", "x"], [undefined, "a", ""]
+  ].map(([m, f, v]) => ({ meta: m, field: f, value: v, result: plain(sheets.setSheetValue(m as never, f as string, v as string)) }));
+  const fields = [
+    { id: "n", label: "N", type: "number" }, { id: "c", label: "C", type: "choice", options: ["Yes", "No"] }, { id: "t", label: "T", type: "text" }
+  ];
+  const validations = fields.flatMap((field) => ["", "  ", "12", "-3.5", "+.5", "1.", "1e3", "abc", " Yes ", "yes", "No"].map((value) => ({ field, value, error: sheets.validateSheetValue(field as never, value) ?? null })));
+  let tid = 0;
+  const tnext = () => `t-${++tid}`;
+  let templates = sheets.addTemplate([], "  ", tnext);
+  const steps: unknown[] = [plain(templates)];
+  templates = sheets.addTemplate(templates, " Villains ", tnext); steps.push(plain(templates));
+  templates = sheets.renameTemplate(templates, "t-1", "  "); steps.push(plain(templates));
+  templates = sheets.renameTemplate(templates, "t-1", " Heroes "); steps.push(plain(templates));
+  templates = sheets.addField(templates, "t-1", { label: " Mood ", type: "choice", options: [" a ", "b", "a", "", " "] }, tnext); steps.push(plain(templates));
+  templates = sheets.addField(templates, "t-1", { label: "Age", type: "number", options: ["x"] }, tnext); steps.push(plain(templates));
+  templates = sheets.addField(templates, "t-1", { label: "  ", type: "text" }, tnext); steps.push(plain(templates));
+  templates = sheets.addField(templates, "t-1", { label: "Tag", type: "choice", options: [" "] }, tnext); steps.push(plain(templates));
+  templates = sheets.renameField(templates, "t-1", "t-3", " Feeling "); steps.push(plain(templates));
+  templates = sheets.reorderField(templates, "t-1", "t-5", -4); steps.push(plain(templates));
+  templates = sheets.reorderField(templates, "t-1", "t-5", 99.7); steps.push(plain(templates));
+  templates = sheets.reorderField(templates, "t-1", "t-5", Number.NaN); steps.push(plain(templates));
+  templates = sheets.changeFieldType(templates, "t-1", "t-3", "text"); steps.push(plain(templates));
+  templates = sheets.setFieldOptions(templates, "t-1", "t-4", [" q ", "q", "r"]); steps.push(plain(templates));
+  templates = sheets.setFieldOptions(templates, "t-1", "t-4", [" "]); steps.push(plain(templates));
+  templates = sheets.removeField(templates, "t-1", "t-4"); steps.push(plain(templates));
+  templates = sheets.removeTemplate(templates, "t-2"); steps.push(plain(templates));
+  const names = ["", "Heroes", " heroes ", "Thriller", "New"].map((name) => ({ name, unique: sheets.uniqueTemplateName([...sheets.allTemplates({}), { id: "x", name: "Heroes" }, { id: "y", name: "Heroes copy" }], name) }));
+  let full: never[] = [];
+  for (let i = 0; i < 22; i += 1) full = sheets.addTemplate(full, `T${i}`, () => `id${i}`) as never[];
+  let many = sheets.addTemplate([], "Many", () => "m");
+  for (let i = 0; i < 42; i += 1) many = sheets.addField(many, "m", { label: `F${i}`, type: "text" }, () => `f${i}`);
+
+  const { OpenFolderSyncProvider } = await import("$lib/storage/sync/open-provider");
+  const { readOpenProjects } = await import("$lib/storage/sync/open-layout");
+  const NOW = 1_763_600_000_000;
+  const nowSpy = vi.spyOn(Date, "now").mockReturnValue(NOW);
+  let sync;
+  try {
+    const project = createStoredProject({
+      ...storyProject(), id: "net", name: "Network", documents: documents as never, chapters: chapters as never,
+      researchFolders: folders as never,
+      sheetTemplates: [{ id: "mine", name: "Mine", fields: [{ id: "custom", label: "Custom", type: "text" }] }],
+      dismissedSuggestions: ["eli|jonah"]
+    } as never, "device-a", 1_763_000_000_000);
+    const fs = new MemoryFileSystem();
+    await new OpenFolderSyncProvider(fs).sync("", [project], {}, NOW, "device-a");
+    const files = await dump(fs);
+    const read = await readOpenProjects(fs, NOW);
+    const edited = { ...files };
+    const marapath = Object.keys(files).find((p) => p.endsWith("/mara.md"))!;
+    edited[marapath] = edited[marapath].replace(/^meta: .*$/m, 'meta: {"kind":"wizard","aliases":[" M "],"relations":[{"id":"x","to":"jonah","type":"bad"}],"z":1}');
+    const editedFs = new MemoryFileSystem();
+    for (const [path, content] of Object.entries(edited)) await editedFs.writeText(path, content);
+    const readEdited = await readOpenProjects(editedFs, NOW);
+    const emptied = { ...files };
+    emptied[marapath] = emptied[marapath].replace(/^meta: .*$/m, 'meta: {"kind":"wizard"}');
+    const emptiedFs = new MemoryFileSystem();
+    for (const [path, content] of Object.entries(emptied)) await emptiedFs.writeText(path, content);
+    const readEmptied = await readOpenProjects(emptiedFs, NOW);
+    sync = { now: NOW, project, files, read, edited, readEdited, emptied, readEmptied, contentKey: projectContentKey(project.project) };
+  } finally {
+    nowSpy.mockRestore();
+  }
+
+  write("network.json", {
+    normalize, story, folders, chapters, documents, kinds, appearances: plain(appearances), relations, pairs, suggestions, active, boundaries,
+    graphCases: plain(graphCases), tiles: plain(tiles), bars, mutations, initials, queries, neighbours, bounds, connects, world, accepted,
+    layouts: plain(layouts), fits: plain(fits), clusters, applied, setValues, validations, steps, names,
+    fullCount: full.length, manyFields: (many[0] as { fields: unknown[] }).fields.length, sync
+  });
+});
