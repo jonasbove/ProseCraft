@@ -41,7 +41,22 @@ const CASES: [string, string][] = [
   ["paragraphs in a list item", "<ul><li><p>a</p><p>b</p></li><li>c</li></ul>"],
   ["a stray end tag after a list", `<ol><li>One.</li><li>Two.</li></ul><p>Three ${IMG}.</p><p>Four.</p>`],
   ["an eyebrow screenplay element", '<p data-sp="scene-heading">INT. ROOM</p><p>x</p><p class="eyebrow" data-sp="dialogue">y</p>'],
-  ["a line separator", "<p>Unicode: café   tab\tend</p>"]
+  ["a line separator", "<p>Unicode: café   tab\tend</p>"],
+  // Containers ProseCraft keeps: `<div>` blocks (WebKit's Enter), wrappers, paragraphs and
+  // other blocks in list items, paragraphs straight in a list, and a Markdown loose list.
+  ["div blocks", "<div>One</div><div><br></div><div>Two <em>it</em></div>"],
+  ["nested and adjacent divs", "<div><div><p>a</p></div><p>b</p></div><div><p>c</p></div>"],
+  ["a div in a blockquote", "<blockquote><div><p>q</p></div><p>r</p></blockquote>"],
+  ["a div in a list item", "<ul><li><div>a</div></li><li>b</li></ul>"],
+  ["a paragraph in a list item", "<ul><li><p>a</p></li></ul>"],
+  ["text and a paragraph in a list item", "<ul><li>text<p>b</p></li></ul>"],
+  ["a paragraph and a list in a list item", "<ul><li><p>a</p><ul><li>b</li></ul></li></ul>"],
+  ["a paragraph straight in a list", "<ol><li>One</li><p>stray</p><li>Two</li></ol>"],
+  ["a loose list", "<ul>\n<li><p>foo</p>\n<p>bar</p>\n</li>\n<li><p>baz</p>\n</li>\n</ul>\n"],
+  ["a blockquote in a list item", "<ul><li><blockquote><p>q</p></blockquote></li></ul>"],
+  ["an empty div and an empty item", "<div></div><ul><li></li></ul>"],
+  ["a list item in no list", "<li>Lone item</li><p>after</p>"],
+  ["fourth-level headings in a row", "<h4>One</h4><h4>Two</h4><p>Three</p>"]
 ];
 
 it.skipIf(!OUT)("writes editor load fixtures", () => {
